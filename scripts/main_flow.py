@@ -166,8 +166,9 @@ def main():
         )
         pipe.set_progress_bar_config(leave=True)
         pipe = pipe.to("cpu")  # 先全在 CPU，避免 from_pretrained 期间盲目占显存
+        
+        print("scheduler:", pipe.scheduler.__class__.__name__)  # FlowMatchEulerDiscreteScheduler / FlowMatchHeunDiscreteScheduler
 
-        # 移动模块到目标设备
         _log("Moving modules to target devices ...", args.debug)
         if hasattr(pipe, "transformer"):    pipe.transformer.to(dev_tr,  dtype=dtype)
         if hasattr(pipe, "text_encoder"):   pipe.text_encoder.to(dev_tr, dtype=dtype)
@@ -222,88 +223,86 @@ def main():
             return (out.float().clamp(-1,1) + 1.0) / 2.0           # [0,1]
 
         def diversity_callback(ppl, i, t, kw):
-            steps = args.steps
-            t_norm = 1.0 - (i / max(1, steps-1))
+            # 1) 从调度器拿“真实时间”和本步步长 Δt（严格 FM）
+            ts = ppl.scheduler.timesteps              # 例如 tensor([..., ...])，单调递减
+            t_cur  = float(ts[i].item())
+            t_next = float(ts[i+1].item()) if i+1 < len(ts) else float(ts[-1].item())
+            t_max, t_min = float(ts[0].item()), float(ts[-1].item())
+            # 规范化时间到 [1,0]（和调度器一一对应）
+            t_norm = (t_cur - t_min) / (t_max - t_min + 1e-8)
+            # 单位化步长（与上面的规范化同尺度）
+            dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
+
             gamma_sched = cfg.gamma0 * sched_factor(t_norm, cfg.t_gate, cfg.sched_shape)
-            if gamma_sched <= 0:
+            if gamma_sched <= 0: 
                 return kw
 
-            lat = kw.get("latents", None)
+            lat = kw.get("latents")
             if lat is None:
                 return kw
+            lat_new = lat.clone()
+
+            # 把本步 latent 搬到 VAE 卡（作为 leaf 的来源），分块降低峰值显存
+            lat_vae_full = lat.detach().to(dev_vae, non_blocking=True).clone()
+            B = lat_vae_full.size(0)
+            chunk = 2 if B >= 2 else 1
+
+            # 上一时刻 latent（CPU），用于估基流速度 v_est
+            prev_cpu = state.get("prev_latents_vae_cpu", None)
 
             import torch
             import torch.backends.cudnn as cudnn
             from torch.utils.checkpoint import checkpoint
 
-            # ---- 预备：把当前 latents 复制出一份“将要返回”的张量（在 Transformer 卡）----
-            lat_new = lat.clone()  # 避免对 kw['latents'] 做原地切片写入
-
-            # VAE 卡上的拷贝（不建图，用作块内 leaf 的来源）
-            lat_vae_full = lat.detach().to(dev_vae, non_blocking=True).clone()
-            B = lat_vae_full.size(0)
-            chunk = 2 if B >= 2 else 1  # 两张一组
-
-            # 上一步的 latent（保存在 CPU 的），用于速度近似
-            prev_cpu = state.get("prev_latents_vae_cpu", None)
-
             for s in range(0, B, chunk):
                 e = min(B, s + chunk)
 
-                # 块内 leaf：z
-                z = lat_vae_full[s:e].detach().clone().requires_grad_(True)  # leaf on VAE device
+                z = lat_vae_full[s:e].detach().clone().requires_grad_(True)
 
-                # 仅为本块建立解码图（降低峰值）
+                # —— 解码到像素（建图；checkpoint 降显存）——
                 with torch.enable_grad(), cudnn.flags(enabled=False, benchmark=False, deterministic=False):
                     imgs_chunk = checkpoint(lambda zz: _vae_decode_pixels(zz), z, use_reentrant=False)
 
-                # 速度近似方向 v_est（块内）
-                v_est = None
-                if prev_cpu is not None:
-                    v_est = z - prev_cpu[s:e].to(dev_vae, non_blocking=True)
-
-                # 在 CLIP 卡上计算 dL/dimage
+                # —— CLIP 卡上求体积损失对“像素”的梯度 —— 
                 imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
-                _, grad_img_clip, _ = vol.volume_loss_and_grad(imgs_clip)
+                _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
                 grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
 
-                # 直接做 VJP：dL/dz
+                # —— VJP 穿回 VAE：得到对 latent 的梯度（把它视为控制“速度” u）——
                 grad_lat = torch.autograd.grad(
-                    outputs=imgs_chunk,
-                    inputs=z,
-                    grad_outputs=grad_img_vae,
-                    retain_graph=False,
-                    create_graph=False,
-                    allow_unused=False,
-                )[0]
+                    outputs=imgs_chunk, inputs=z, grad_outputs=grad_img_vae,
+                    retain_graph=False, create_graph=False, allow_unused=False
+                )[0]  # [bs,C,h,w] on VAE
 
-                # 正交投影 + trust region
+                # —— 基流速度估计：v_est = Δz / Δt —— 
+                v_est = None
+                if prev_cpu is not None:
+                    v_est = (z - prev_cpu[s:e].to(dev_vae, non_blocking=True)) / max(dt_unit, 1e-8)
+
+                # —— 质量保护：部分正交到基流速度 + 信赖域（位移尺度）——
+                from diverse_flow.utils import project_partial_orth, batched_norm
                 g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
-                v_norm = batched_norm(v_est) if v_est is not None else batched_norm(z)
-                g_norm = batched_norm(g_proj)
-                cap    = cfg.gamma_max_ratio * v_norm
-                scale  = torch.minimum(torch.ones_like(cap), cap / (g_norm + 1e-12))
-                delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * g_proj  # on VAE
+                u = g_proj  # 把投影后的方向当作“控制速度”
 
-                # 写入到“新的” transformer 侧 latent（一次性回填，避免原地别名）
+                # 基础位移量级（base displacement）：|Δz_base| ≈ |v_est * Δt|
+                base_disp = (v_est * dt_unit) if v_est is not None else z
+                disp_cap  = cfg.gamma_max_ratio * batched_norm(base_disp)     # 上限（位移尺度）
+                raw_disp  = batched_norm(u) * dt_unit                          # 控制将带来的位移尺度
+                scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (raw_disp + 1e-12))
+
+                delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * (u * dt_unit)
+
                 delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
                 lat_new[s:e] = lat_new[s:e] + delta_tr
 
-                # 尽早同步，帮助把真正的错误定位到上一行而不是下一次 API 调用
-                if dev_clip.type == 'cuda':
-                    torch.cuda.synchronize(dev_clip)
-                if dev_vae.type == 'cuda':
-                    torch.cuda.synchronize(dev_vae)
+                if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
+                if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
+                del imgs_chunk, imgs_clip, grad_img_clip, grad_img_vae, grad_lat, g_proj, u, base_disp, disp_cap, raw_disp, scale, delta_chunk, delta_tr, v_est, z
 
-                # 释放块内中间变量（不再 empty_cache）
-                del imgs_chunk, imgs_clip, grad_img_clip, grad_img_vae, grad_lat, g_proj, v_norm, g_norm, cap, scale, delta_chunk, delta_tr, v_est, z
-
-            # 把新的 latent 交回管线
-            kw['latents'] = lat_new
-
-            # 把本步 latent 放到 CPU，减少 VAE 卡驻留
+            kw["latents"] = lat_new
             state["prev_latents_vae_cpu"] = lat_vae_full.detach().to("cpu")
             return kw
+
 
         # ===== 4) 生成 latent（不让管线内部 decode） =====
         os.makedirs(args.out, exist_ok=True)

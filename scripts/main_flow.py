@@ -84,7 +84,7 @@ def parse_args():
     # 本地模型路径
     ap.add_argument('--model-dir', type=str, default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'stable-diffusion-3.5-medium')))
     ap.add_argument('--clip-jit', type=str, default=os.path.expanduser('~/.cache/clip/ViT-B-32.pt'))
-    ap.add_argument('--out', type=str, default='./outs_sd3_diverse')
+    ap.add_argument('--out', type=str, default=None)
     ap.add_argument('--method',type=str,default='ourMethod')
     # 多样性目标
     ap.add_argument('--gamma0', type=float, default=0.12)
@@ -311,12 +311,17 @@ def main():
             s = re.sub(r'[^A-Za-z0-9._-]+', '', s)
             s = re.sub(r'_{2,}', '_', s).strip('._-')
             return s[:maxlen] if maxlen and len(s) > maxlen else s
+        
+        prompt_slug = _slugify(args.prompt)
+        outputs_root = os.path.join(project_root, 'outputs')  # diverse_flow/outputs
+        auto_dirname = f"{args.method}_{prompt_slug or 'no_prompt'}"
+        out_dir = args.out if (args.out and len(args.out.strip()) > 0) else os.path.join(outputs_root, auto_dirname)
 
         os.makedirs(out_dir, exist_ok=True)
         _log(f"Output dir: {out_dir}", True)
 
         # ===== 4) 生成 latent（不让管线内部 decode） =====
-        os.makedirs(args.out, exist_ok=True)
+        # os.makedirs(args.out, exist_ok=True)
         generator = torch.Generator(device=dev_tr) if dev_tr.type=='cuda' else torch.Generator()
         generator.manual_seed(args.seed)
 
@@ -345,15 +350,10 @@ def main():
 
         with torch.inference_mode(), cudnn.flags(enabled=False, benchmark=False, deterministic=False):
             images = checkpoint(lambda z: _vae_decode_pixels(z), latents_final, use_reentrant=False)
-            
-        prompt_slug = _slugify(args.prompt)
-        outputs_root = os.path.join(project_root, 'outputs')  # diverse_flow/outputs
-        auto_dirname = f"{args.method}_{prompt_slug or 'no_prompt'}"
-        out_dir = args.out if (args.out and len(args.out.strip()) > 0) else os.path.join(outputs_root, auto_dirname)
 
         # 保存
         for i in range(images.size(0)):
-            save_image(images[i].cpu(), os.path.join(args.out, f"img_{i:03d}.png"))
+            save_image(images[i].cpu(), os.path.join(out_dir, f"img_{i:03d}.png"))
 
         _log(f"Done. Saved to {out_dir}", True)
 

@@ -6,6 +6,7 @@ SD3.5 本地 + CLIP 多样性增强（稳定版）
 - 回调：VAE 卡解码 -> CLIP 卡体积损失 -> 回 VAE 做 VJP -> δ 写回 Transformer 卡
 - 末尾：让管线输出 latent（output_type='latent'），我们手动在 VAE 卡 decode，避免设备冲突
 """
+# source flowqd/bin/activate
 import os, sys, argparse, traceback, time
 
 def _gb(x): return f"{x/1024**3:.2f} GB"

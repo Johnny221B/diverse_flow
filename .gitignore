@@ -20,3 +20,7 @@ __pycache__/
 **/outputs/
 
 **/datasets/
+
+/t2v_metrics/
+/evaluation/DIMCIM/
+/BeyondFID/

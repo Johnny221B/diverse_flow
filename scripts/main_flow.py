@@ -316,7 +316,8 @@ def main():
         prompt_slug = _slugify(args.prompt)
         outputs_root = os.path.join(project_root, 'outputs')  # diverse_flow/outputs
         auto_dirname = f"{args.method}_{prompt_slug or 'no_prompt'}"
-        out_dir = args.out if (args.out and len(args.out.strip()) > 0) else os.path.join(outputs_root, auto_dirname)
+        base_out_dir = args.out if (args.out and len(args.out.strip()) > 0) else os.path.join(outputs_root, auto_dirname)
+        out_dir = os.path.join(base_out_dir, "imgs")
 
         os.makedirs(out_dir, exist_ok=True)
         _log(f"Output dir: {out_dir}", True)

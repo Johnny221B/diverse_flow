@@ -80,7 +80,7 @@ def parse_args():
     ap.add_argument('--height', type=int, default=1024)
     ap.add_argument('--width', type=int, default=1024)
     ap.add_argument('--steps', type=int, default=10)
-    ap.add_argument('--guidance', type=float, default=4.5)
+    ap.add_argument('--guidance', type=float, default=3.0)
     ap.add_argument('--seed', type=int, default=42)
     # 本地模型路径
     ap.add_argument('--model-dir', type=str, default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'stable-diffusion-3.5-medium')))

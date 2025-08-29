@@ -11,8 +11,8 @@ Vendi-Score evaluator (official package) with robust torchvision fix.
 - Supports whole-folder or per-subfolder evaluation; outputs JSON.
 """
 
-# python eval_vendi_score.py --images /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_a_cozy_cabin_in_a_snowy_forest --device cuda --save /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_a_cozy_cabin_in_a_snowy_forest/vendi.json
-# python eval_vendi_score.py --images /mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_a_cozy_cabin_in_a_snowy_forest --device cuda --save /mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_a_cozy_cabin_in_a_snowy_forest/vendi.json
+# python eval_vendi_score.py --images /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_A_photo_of_boxer/imgs --device cuda --save /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_A_photo_of_boxer/eval/vendi.json
+# python eval_vendi_score.py --images /mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_a_photo_of_boxer/imgs --device cuda --save /mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_a_photo_of_boxer/eval/vendi.json
 
 import argparse
 import json

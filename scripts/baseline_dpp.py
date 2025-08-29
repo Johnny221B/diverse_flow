@@ -2,7 +2,7 @@
 # File: flow_base/scripts/baseline_dpp.py
 # =============================
 
-# CUDA_VISIBLE_DEVICES=5,6,7 python scripts/baseline_dpp.py   --prompt "a cozy cabin in a snowy forest"   --K 8 --steps 10 --guidance 7.0 --fp16   --device_transformer cuda:1 --device_vae cuda:2 --device_clip cuda:0   --model-dir models/stable-diffusion-3.5-medium   --openai_clip_jit_path ~/.cache/clip/ViT-B-32.pt   --decode_size 224 --chunk_size 2
+# CUDA_VISIBLE_DEVICES=5,6,7 python scripts/baseline_dpp.py   --prompt "a photo of boxer"   --K 16 --steps 10 --guidance 3.0 --fp16   --device_transformer cuda:1 --device_vae cuda:2 --device_clip cuda:0   --model-dir models/stable-diffusion-3.5-medium   --openai_clip_jit_path ~/.cache/clip/ViT-B-32.pt   --decode_size 224 --chunk_size 2
 
 import os, sys, argparse, random, re
 from pathlib import Path

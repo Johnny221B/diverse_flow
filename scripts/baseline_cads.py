@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Prompts
     p.add_argument("--prompt", type=str, required=True)
-    p.add_argument("--negative", type=str, default="")
+    p.add_argument("--negative", type=str, default="low quality, blurry")
 
     # Sampling
     p.add_argument("--G", type=int, default=4, help="Images per prompt")

@@ -41,8 +41,11 @@ def _slugify(text: str, maxlen: int = 80) -> str:
     return s[:maxlen] if maxlen and len(s) > maxlen else s
 
 def _ensure_out(prompt: str) -> Path:
-    out_dir = REPO_ROOT / "outputs" / f"dpp_{_slugify(prompt)}"
+    base_dir = REPO_ROOT / "outputs" / f"dpp_{_slugify(prompt)}"
+    out_dir = os.path.join(base_dir, "imgs")
+    eval_dir = os.path.join(base_dir, "eval")
     out_dir.mkdir(parents=True, exist_ok=True)
+    eval_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
 def parse_args():

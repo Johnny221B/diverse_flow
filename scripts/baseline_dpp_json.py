@@ -8,6 +8,7 @@
 import os, sys, argparse, random, re, json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
+from collections import OrderedDict
 
 import torch
 from PIL import Image
@@ -56,23 +57,39 @@ def _build_root_out(method: str, concept: str) -> Tuple[Path, Path, Path]:
     eval_dir.mkdir(parents=True, exist_ok=True)
     return base, imgs, eval_dir
 
-def _flatten_prompts_from_spec(spec: Dict[str, Any]) -> Tuple[str, List[str]]:
-    concept = spec.get("concept", "concept")
-    pools = []
-    sap = spec.get("simple_attribute_prompts", {})
-    for _group, kv in sap.items():
-        if isinstance(kv, dict):
-            for _attr, p in kv.items():
-                if isinstance(p, str) and p.strip():
-                    pools.append(p.strip())
-    # 去重但保序
-    seen, out = set(), []
-    for p in pools:
-        if p not in seen:
-            seen.add(p); out.append(p)
-    if not out:
-        raise ValueError("[DPP] spec.simple_attribute_prompts 里没有解析到有效的 prompt")
-    return concept, out
+def _flatten_prompts_from_spec(spec: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
+    """
+    按照新格式解析（仅按你给的结构）：
+      {
+        "dog": ["a photo of a dog", "a dog", ...],
+        "truck": ["a photo of a truck", "a truck", ...],
+        ...
+      }
+    返回：OrderedDict{ concept -> [prompts...] }（按文件中出现顺序）
+    """
+    if not isinstance(spec, dict):
+        raise ValueError("[DPP] 需要顶层为对象：{concept: [prompts...]}")
+
+    concept_to_prompts: "OrderedDict[str, List[str]]" = OrderedDict()
+    for concept, plist in spec.items():
+        if not isinstance(concept, str):
+            continue
+        if not isinstance(plist, (list, tuple)):
+            continue
+        # 清洗并去重（保序）
+        seen, cleaned = set(), []
+        for p in plist:
+            if isinstance(p, str):
+                s = p.strip()
+                if s and s not in seen:
+                    seen.add(s); cleaned.append(s)
+        if cleaned:
+            concept_to_prompts[concept] = cleaned
+
+    if not concept_to_prompts:
+        raise ValueError("[DPP] 没有解析到有效的 prompts；请确保格式为 {concept: [\"a dog\", ...]}")
+
+    return concept_to_prompts
 
 def _generators_for_K(device: torch.device, base_seed: int, K: int) -> List[torch.Generator]:
     return [torch.Generator(device=device).manual_seed(int(base_seed) + i) for i in range(K)]
@@ -85,9 +102,9 @@ def parse_args():
     p = argparse.ArgumentParser(description="DPP grid sampler for DIM/CIM evaluation")
     # 输入：二选一
     p.add_argument("--spec", type=str, default=None,
-                   help="DIM/CIM JSON 规格文件路径（含 concept & prompts）。提供则覆盖 --prompt。")
+                   help="JSON 文件路径；格式为 {concept: [prompts...] }。提供则覆盖 --prompt。")
     p.add_argument("--prompt", type=str, default=None,
-                   help="prompt mode: find --spec missing ")
+                   help="单条 prompt（若未提供 --spec 时可用）")
 
     # 网格
     p.add_argument("--K", type=int, default=4, help="每个 prompt 生成 K 张（组内联动做 DPP）")
@@ -243,43 +260,42 @@ def run_one(pipe, coupler, device_tr: torch.device, prompt: str, K: int, steps: 
 def main():
     args = parse_args()
 
-    # 解析 prompts
-    concept = "default"
-    prompts: List[str] = []
+    # 解析成 concept -> prompts 的映射（仅按新格式；若不用 --spec，可用 --prompt）
     if args.spec:
-        spec = json.loads(Path(args.spec).read_text())
-        concept, prompts = _flatten_prompts_from_spec(spec)
+        with open(args.spec, "r", encoding="utf-8") as fp:
+            spec = json.load(fp)
+        concept_to_prompts = _flatten_prompts_from_spec(spec)  # OrderedDict
     elif args.prompt:
-        concept, prompts = "single", [args.prompt]
+        concept_to_prompts = OrderedDict([("single", [args.prompt])])
     else:
-        raise ValueError("请提供 --spec（DIM/CIM JSON）或 --prompt（单条）之一。")
+        raise ValueError("请提供 --spec（JSON 文件路径）或 --prompt（单条）之一。")
 
     # guidance 列表
     guidances = args.guidances if args.guidances is not None else [args.guidance]
     guidances = [float(g) for g in guidances]
-
-    # 输出目录：outputs/{method}_{concept}/...
-    _, imgs_root, eval_dir = _build_root_out(args.method, concept)
-    print(f"[DPP] outputs base: {imgs_root.parent}")
-    print(f"[DPP] eval dir:     {eval_dir}")
 
     # 构建一次 pipeline / DPP，循环复用
     pipe, coupler, dev_tr = build_all(args)
     dtype = torch.float16 if args.fp16 else torch.float32
     print(f"[DPP] ready. dtype={dtype}, K={args.K}, steps={args.steps}, W×H={args.width}×{args.height}")
 
-    # 网格循环
-    for ptext in prompts:
-        p_slug = _slugify(ptext)  # prompt 的文件夹名基底
-        for g in guidances:
-            for s in args.seeds:
-                subdir = imgs_root / f"{p_slug}_seed{s}_g{g}_s{args.steps}"
-                print(f"[DPP] sampling: prompt='{ptext}' | seed={s} | guidance={g} | steps={args.steps} -> {subdir}")
-                run_one(pipe, coupler, dev_tr,
-                        prompt=ptext, K=args.K, steps=args.steps,
-                        guidance=float(g), seed=int(s),
-                        target_wh=(args.width, args.height),
-                        out_dir=subdir)
+    # 按 concept 分开在 outputs/{method}_{concept} 下落盘
+    for concept, prompts in concept_to_prompts.items():
+        _, imgs_root, eval_dir = _build_root_out(args.method, concept)
+        print(f"[DPP] outputs base: {imgs_root.parent}")
+        print(f"[DPP] eval dir:     {eval_dir}")
+
+        for ptext in prompts:
+            p_slug = _slugify(ptext)  # prompt 的文件夹名基底
+            for g in guidances:
+                for s in args.seeds:
+                    subdir = imgs_root / f"{p_slug}_seed{s}_g{g}_s{args.steps}"
+                    print(f"[DPP] sampling: concept='{concept}' | prompt='{ptext}' | seed={s} | guidance={g} | steps={args.steps} -> {subdir}")
+                    run_one(pipe, coupler, dev_tr,
+                            prompt=ptext, K=args.K, steps=args.steps,
+                            guidance=float(g), seed=int(s),
+                            target_wh=(args.width, args.height),
+                            out_dir=subdir)
 
     print("[DPP] Done.")
 

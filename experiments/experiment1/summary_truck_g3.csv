@@ -1,0 +1,2 @@
+label,auc_prd_mu,rec_at_p0.60_mu,rec_at_p0.70_mu,rec_at_p0.76_mu,source
+dpp,0.1198127287901135,0.1042477766142642,0.0999170576731146,0.0975872641029488,/mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_truck/eval/exp1_3.0_truck.csv

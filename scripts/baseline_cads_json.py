@@ -3,7 +3,7 @@
 Grid evaluation for CADS on SD-3.5 (Flow-Matching).
 
 - Inputs:
-  * Either a DIM/CIM spec JSON (concept + grouped prompts),
+  * New JSON format: { "dog": [...], "truck": [...], ... } (top-level keys are concepts)
     or a single --prompt string (back-compat).
   * Multiple guidance scales (--guidances) and multiple seeds (--seeds).
 
@@ -17,7 +17,7 @@ Grid evaluation for CADS on SD-3.5 (Flow-Matching).
 Example:
   python -u scripts/cads_eval_grid.py \
     --model "./models/stable-diffusion-3.5-medium" \
-    --spec ./specs/truck.json \
+    --spec ./specs/mscoco_subset.json \
     --negative "" \
     --G 16 --steps 10 \
     --guidances 3.0 7.5 12.0 \
@@ -26,21 +26,17 @@ Example:
     --dtype fp16 \
     --device-transformer cuda:0 --device-vae cuda:1 --device-clip cuda:0 \
     --method cads
-
-Notes:
-- Reuses your CADS class; supports fallback imports (cads / CADS / cads.cads).
-- Builds (or reuses) the pipeline and applies CADS via callback_on_step_end.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
-import re
 import sys
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from collections import OrderedDict
 
 import torch
 from PIL import Image
@@ -74,35 +70,31 @@ def slugify(text: str, maxlen: int = 120) -> str:
     s = re.sub(r"_{2,}", "_", s).strip("._-")
     return s[:maxlen] if maxlen and len(s) > maxlen else s
 
-def _flatten_prompts_from_spec(spec: Dict[str, Any]) -> Tuple[str, List[str]]:
+def _parse_concepts_spec(spec: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
     """
-    DIM/CIM-style spec:
-    {
-        "concept": "truck",
-        "simple_attribute_prompts": {
-            "color": {"red": "a red truck", ...},
-            "accessories": {...},
-            ...
-        }
-    }
-    -> (concept, [prompt1, prompt2, ...])
+    Strictly parse the new spec format:
+      { "dog": ["a dog", "a photo of a dog", ...], "truck": [...], ... }
+    Returns: OrderedDict{concept -> [prompts...]} in file order, each list de-duped (stable).
     """
-    concept = spec.get("concept", "concept")
-    out: List[str] = []
-    sap = spec.get("simple_attribute_prompts", {})
-    for _, mp in sap.items():
-        if isinstance(mp, dict):
-            for _, txt in mp.items():
-                if isinstance(txt, str) and txt.strip():
-                    out.append(txt.strip())
-    # de-dup but keep order
-    seen, uniq = set(), []
-    for p in out:
-        if p not in seen:
-            seen.add(p); uniq.append(p)
-    if not uniq:
-        raise ValueError("[CADS] No valid prompts parsed from spec.simple_attribute_prompts")
-    return concept, uniq
+    if not isinstance(spec, dict):
+        raise ValueError("[CADS] Spec must be a JSON object: {concept: [prompts...]}")
+
+    concept_to_prompts: "OrderedDict[str, List[str]]" = OrderedDict()
+    for concept, plist in spec.items():
+        if not isinstance(concept, str) or not isinstance(plist, (list, tuple)):
+            continue
+        seen, cleaned = set(), []
+        for p in plist:
+            if isinstance(p, str):
+                s = p.strip()
+                if s and s not in seen:
+                    seen.add(s); cleaned.append(s)
+        if cleaned:
+            concept_to_prompts[concept] = cleaned
+
+    if not concept_to_prompts:
+        raise ValueError("[CADS] No valid {concept: [prompts...]} found in spec.")
+    return concept_to_prompts
 
 def _outputs_root(method: str, concept: str) -> Tuple[Path, Path, Path]:
     """
@@ -145,7 +137,7 @@ def _generators_for_K(exec_device: str, base_seed: int, K: int) -> List[torch.Ge
 
 
 # ---------------------------
-# Robust SD3.5 loader (same spirit as your baseline)
+# Robust SD3.5 loader
 # ---------------------------
 def _resolve_model_dir(root: Path) -> Path:
     # exact dir
@@ -206,8 +198,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--method", type=str, default="cads", help="outputs/{method}_{concept}")
     p.add_argument("--out", type=str, default="outputs", help="(unused for structure; kept for compatibility)")
 
-    # Prompts
-    p.add_argument("--spec", type=str, default=None, help="Path to DIM/CIM JSON spec")
+    # Prompts (new spec or single prompt)
+    p.add_argument("--spec", type=str, default=None,
+                   help="Path to JSON: {concept: [prompts...]} (overrides --prompt)")
     p.add_argument("--prompt", type=str, default=None, help="Fallback if --spec not provided")
     p.add_argument("--negative", type=str, default="low quality, blurry")
 
@@ -255,20 +248,15 @@ def main():
     args = build_parser().parse_args()
     torch_dtype = _select_dtype(args.dtype)
 
-    # Parse prompts
+    # Parse prompts source
     if args.spec:
-        spec = json.loads(Path(args.spec).read_text())
-        concept, prompts = _flatten_prompts_from_spec(spec)
+        with open(args.spec, "r", encoding="utf-8") as fp:
+            spec = json.load(fp)
+        concept_to_prompts = _parse_concepts_spec(spec)  # OrderedDict
     elif args.prompt:
-        concept, prompts = "single", [args.prompt]
+        concept_to_prompts = OrderedDict([("single", [args.prompt])])
     else:
-        raise ValueError("Provide either --spec (DIM/CIM JSON) or --prompt")
-
-    # Prepare output structure root
-    base_dir, eval_dir, imgs_root = _outputs_root(args.method, concept)
-    _log(f"[CADS] outputs base: {base_dir}")
-    _log(f"[CADS] eval dir:     {eval_dir}")
-    _log(f"[CADS] imgs root:    {imgs_root}")
+        raise ValueError("Provide either --spec (JSON file) or --prompt")
 
     guidances = args.guidances if args.guidances is not None else [args.guidance]
     guidances = [float(g) for g in guidances]
@@ -318,58 +306,65 @@ def main():
     except Exception:
         exec_dev = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # ---- Grid: prompt × guidance × seed ----
-    for ptxt in prompts:
-        for g in guidances:
-            for sd in args.seeds:
-                # CADS instance per (guidance, seed) so that seed-dependent noise (if any) is reproducible
-                cads = CADS(
-                    num_inference_steps=int(args.steps),
-                    tau1=float(args.tau1), tau2=float(args.tau2),
-                    s=float(args.cads_s), psi=float(args.psi),
-                    rescale=(not args.no_rescale),
-                    dynamic_cfg=bool(args.dynamic_cfg),
-                    seed=int(sd),
-                )
+    # ---- Iterate by concept to write into outputs/{method}_{concept}/... ----
+    for concept, prompts in concept_to_prompts.items():
+        base_dir, eval_dir, imgs_root = _outputs_root(args.method, concept)
+        _log(f"[CADS] outputs base: {base_dir}")
+        _log(f"[CADS] eval dir:     {eval_dir}")
+        _log(f"[CADS] imgs root:    {imgs_root}")
 
-                gens = _generators_for_K(exec_dev, int(sd), int(args.G))
-
-                run_dir = _prompt_run_dir(
-                    imgs_root=imgs_root,
-                    prompt=ptxt, seed=int(sd),
-                    guidance=float(g), steps=int(args.steps)
-                )
-                _log(f"[CADS] sampling: prompt='{ptxt}' | seed={sd} | guidance={g} | steps={args.steps} -> {run_dir}")
-
-                # Try passing height/width; if unsupported, call without and resize on save
-                try:
-                    result = pipe(
-                        prompt=ptxt,
-                        negative_prompt=(args.negative if args.negative else None),
-                        height=int(args.height), width=int(args.width),
-                        num_images_per_prompt=int(args.G),
+        # Grid: prompt × guidance × seed
+        for ptxt in prompts:
+            for g in guidances:
+                for sd in args.seeds:
+                    # CADS instance per (guidance, seed) for reproducibility
+                    cads = CADS(
                         num_inference_steps=int(args.steps),
-                        guidance_scale=float(g),
-                        generator=gens,
-                        callback_on_step_end=cads,
-                        callback_on_step_end_tensor_inputs=["latents"],
-                        output_type="pil",
-                    )
-                except TypeError:
-                    result = pipe(
-                        prompt=ptxt,
-                        negative_prompt=(args.negative if args.negative else None),
-                        num_images_per_prompt=int(args.G),
-                        num_inference_steps=int(args.steps),
-                        guidance_scale=float(g),
-                        generator=gens,
-                        callback_on_step_end=cads,
-                        callback_on_step_end_tensor_inputs=["latents"],
-                        output_type="pil",
+                        tau1=float(args.tau1), tau2=float(args.tau2),
+                        s=float(args.cads_s), psi=float(args.psi),
+                        rescale=(not args.no_rescale),
+                        dynamic_cfg=bool(args.dynamic_cfg),
+                        seed=int(sd),
                     )
 
-                images = result.images if hasattr(result, "images") else result
-                _save_images(images, run_dir, (args.width, args.height))
+                    gens = _generators_for_K(exec_dev, int(sd), int(args.G))
+
+                    run_dir = _prompt_run_dir(
+                        imgs_root=imgs_root,
+                        prompt=ptxt, seed=int(sd),
+                        guidance=float(g), steps=int(args.steps)
+                    )
+                    _log(f"[CADS] sampling: concept='{concept}' | prompt='{ptxt}' | seed={sd} | guidance={g} | steps={args.steps} -> {run_dir}")
+
+                    # Try passing height/width; if unsupported, call without and resize on save
+                    try:
+                        result = pipe(
+                            prompt=ptxt,
+                            negative_prompt=(args.negative if args.negative else None),
+                            height=int(args.height), width=int(args.width),
+                            num_images_per_prompt=int(args.G),
+                            num_inference_steps=int(args.steps),
+                            guidance_scale=float(g),
+                            generator=gens,
+                            callback_on_step_end=cads,
+                            callback_on_step_end_tensor_inputs=["latents"],
+                            output_type="pil",
+                        )
+                    except TypeError:
+                        result = pipe(
+                            prompt=ptxt,
+                            negative_prompt=(args.negative if args.negative else None),
+                            num_images_per_prompt=int(args.G),
+                            num_inference_steps=int(args.steps),
+                            guidance_scale=float(g),
+                            generator=gens,
+                            callback_on_step_end=cads,
+                            callback_on_step_end_tensor_inputs=["latents"],
+                            output_type="pil",
+                        )
+
+                    images = result.images if hasattr(result, "images") else result
+                    _save_images(images, run_dir, (args.width, args.height))
 
     _log("[CADS] Done.")
 

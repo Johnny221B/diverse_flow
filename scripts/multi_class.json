@@ -1,0 +1,58 @@
+{
+    "truck": [
+        "a photo of a truck",
+        "a truck",
+        "a cropped photo of a truck",
+        "a close-up photo of a truck",
+        "a photo of one truck"
+    ],
+    "bicycle": [
+        "a photo of a bicycle",
+        "a bicycle",
+        "a cropped photo of a bicycle",
+        "a close-up photo of a bicycle",
+        "a photo of one bicycle"
+    ],
+    "bear": [
+        "a photo of a bear",
+        "a bear",
+        "a cropped photo of a bear",
+        "a close-up photo of a bear",
+        "a photo of one bear"
+    ],
+    "dog": [
+        "a photo of a dog",
+        "a dog",
+        "a cropped photo of a dog",
+        "a close-up photo of a dog",
+        "a photo of one dog"
+    ],
+    "couch": [
+        "a photo of a couch",
+        "a couch",
+        "a cropped photo of a couch",
+        "a close-up photo of a couch",
+        "a photo of one couch"
+    ],
+    "dining table": [
+        "a photo of a dining table",
+        "a dining table",
+        "a cropped photo of a dining table",
+        "a close-up photo of a dining table",
+        "a photo of one dining table"
+    ],
+    "potted plant": [
+        "a photo of a potted plant",
+        "a potted plant",
+        "a cropped photo of a potted plant",
+        "a close-up photo of a potted plant",
+        "a photo of one potted plant"
+    ],
+    "bus": [
+        "a photo of a bus",
+        "a bus",
+        "a cropped photo of a bus",
+        "a close-up photo of a bus",
+        "a photo of one bus"
+    ]
+}

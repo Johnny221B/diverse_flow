@@ -3,9 +3,9 @@
 Grid evaluation for Particle Guidance (PG) on SD3.5 (Flow Matching).
 
 - Inputs:
-  * Either a DIM/CIM spec JSON (concept + grouped prompts),
-    or a single --prompt string (back-compat).
-  * Multiple guidance scales (--guidances) and multiple seeds (--seeds).
+  * New JSON format: { "dog": [...], "truck": [...], ... }
+    (top-level keys are concepts; each value is a list of prompts)
+  * Or a single --prompt string (back-compat).
 
 - Outputs:
   outputs/{method}_{concept}/
@@ -17,7 +17,7 @@ Grid evaluation for Particle Guidance (PG) on SD3.5 (Flow Matching).
 Example:
   python -u scripts/pg_eval_grid.py \
     --model "./models/stable-diffusion-3.5-medium" \
-    --spec ./specs/truck.json \
+    --spec ./specs/mscoco_subset.json \
     --negative "low quality, blurry" \
     --G 16 --steps 10 \
     --guidances 3.0 7.5 12.0 \
@@ -25,20 +25,16 @@ Example:
     --height 512 --width 512 \
     --device cuda:0 --fp16 \
     --method pg
-
-NOTE:
-- This script reuses FlowSampler/PGConfig from Particle_Guidance.
-- It (re)builds FlowSampler per guidance for clarity & correctness.
 """
 
 from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from collections import OrderedDict
 
 import torch
 from PIL import Image
@@ -57,36 +53,40 @@ from Particle_Guidance.utils import seed_everything, slugify
 # ---------------------------
 # Utilities
 # ---------------------------
-def _flatten_prompts_from_spec(spec: Dict[str, Any]) -> Tuple[str, List[str]]:
+def _parse_concepts_spec(spec: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
     """
-    Parse DIM/CIM-style spec:
-    {
-        "concept": "truck",
-        "simple_attribute_prompts": {
-            "color": {"red": "a red truck", ...},
-            "accessories": {...},
-            ...
-        }
-    }
-    Returns: (concept, [prompt1, prompt2, ...])
+    Parse the *new* spec format strictly:
+      {
+        "dog": ["a photo of a dog", "a dog", ...],
+        "truck": ["a photo of a truck", "a truck", ...],
+        ...
+      }
+    Returns: OrderedDict{ concept -> [prompts...] } (keep file order)
     """
-    concept = spec.get("concept", "concept")
-    out: List[str] = []
-    sap = spec.get("simple_attribute_prompts", {})
-    for _, mp in sap.items():
-        if isinstance(mp, dict):
-            for _, txt in mp.items():
-                if isinstance(txt, str) and txt.strip():
-                    out.append(txt.strip())
-    # de-dup while keeping order
-    seen, uniq = set(), []
-    for p in out:
-        if p not in seen:
-            seen.add(p)
-            uniq.append(p)
-    if not uniq:
-        raise ValueError("[PG] No valid prompts parsed from spec.simple_attribute_prompts")
-    return concept, uniq
+    if not isinstance(spec, dict):
+        raise ValueError("[PG] Spec must be a JSON object: {concept: [prompts...]}")
+
+    concept_to_prompts: "OrderedDict[str, List[str]]" = OrderedDict()
+    for concept, plist in spec.items():
+        if not isinstance(concept, str):
+            continue
+        if not isinstance(plist, (list, tuple)):
+            continue
+        # clean & de-dup while preserving order
+        seen, cleaned = set(), []
+        for p in plist:
+            if isinstance(p, str):
+                s = p.strip()
+                if s and s not in seen:
+                    seen.add(s)
+                    cleaned.append(s)
+        if cleaned:
+            concept_to_prompts[concept] = cleaned
+
+    if not concept_to_prompts:
+        raise ValueError("[PG] No valid {concept: [prompts...]} found in spec.")
+
+    return concept_to_prompts
 
 
 def _outputs_root(method: str, concept: str) -> Tuple[Path, Path, Path]:
@@ -128,15 +128,19 @@ def build_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="SD3.5 + Particle Guidance (grid evaluation)")
 
     # Input spec OR single prompt
-    p.add_argument("--spec", type=str, default=None, help="Path to DIM/CIM JSON spec")
-    p.add_argument("--prompt", type=str, default=None, help="Fallback single prompt if --spec not provided")
+    p.add_argument("--spec", type=str, default=None,
+                   help="Path to JSON: {concept: [prompts...]} (overrides --prompt)")
+    p.add_argument("--prompt", type=str, default=None,
+                   help="Single prompt if --spec not provided")
     p.add_argument("--negative", type=str, default=None)
 
     # Grid
     p.add_argument("--G", type=int, default=4, help="Group size (images per prompt)")
     p.add_argument("--steps", type=int, default=30, help="#flow steps (NFE)")
-    p.add_argument("--guidances", type=float, nargs="+", default=None, help="List of cfg scales; e.g., 3.0 7.5 12.0")
-    p.add_argument("--cfg", type=float, default=5.0, help="Single cfg if --guidances is omitted")
+    p.add_argument("--guidances", type=float, nargs="+", default=None,
+                   help="List of cfg scales; e.g., 3.0 7.5 12.0")
+    p.add_argument("--cfg", type=float, default=5.0,
+                   help="Single cfg if --guidances is omitted")
     p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444])
 
     # Resolution
@@ -144,7 +148,8 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--width", type=int, default=512)
 
     # Model/device
-    p.add_argument("--model", type=str, required=True, help="Path to SD3.5 (Diffusers layout)")
+    p.add_argument("--model", type=str, required=True,
+                   help="Path to SD3.5 (Diffusers layout)")
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--fp16", action="store_true")
     p.add_argument("--attention-slicing", action="store_true")
@@ -159,7 +164,8 @@ def build_args() -> argparse.Namespace:
                    help="Fixed RBF bandwidth; None -> median trick")
 
     # For directory naming
-    p.add_argument("--method", type=str, default="pg", help="Method name for outputs/{method}_{concept}")
+    p.add_argument("--method", type=str, default="pg",
+                   help="Method name for outputs/{method}_{concept}")
 
     return p.parse_args()
 
@@ -170,28 +176,21 @@ def build_args() -> argparse.Namespace:
 def main():
     args = build_args()
 
-    # Parse prompts
-    concept = "single"
-    prompts: List[str] = []
+    # Parse source of prompts
     if args.spec:
-        spec = json.loads(Path(args.spec).read_text())
-        concept, prompts = _flatten_prompts_from_spec(spec)
+        with open(args.spec, "r", encoding="utf-8") as fp:
+            spec = json.load(fp)
+        concept_to_prompts = _parse_concepts_spec(spec)  # OrderedDict
     elif args.prompt:
-        concept, prompts = "single", [args.prompt]
+        concept_to_prompts = OrderedDict([("single", [args.prompt])])
     else:
-        raise ValueError("Provide either --spec (DIM/CIM JSON) or --prompt")
+        raise ValueError("Provide either --spec (JSON file) or --prompt")
 
     guidances = args.guidances if args.guidances is not None else [args.cfg]
     guidances = [float(g) for g in guidances]
 
     dtype = torch.float16 if args.fp16 else torch.float32
     device = torch.device(args.device)
-
-    # Prepare output directories
-    base_dir, eval_dir, imgs_root = _outputs_root(args.method, concept)
-    print(f"[PG] outputs base: {base_dir}")
-    print(f"[PG] eval dir:     {eval_dir}")
-    print(f"[PG] imgs root:    {imgs_root}")
 
     # PG static config (per run we only vary cfg & seed)
     pg_cfg = PGConfig(
@@ -202,42 +201,49 @@ def main():
         bandwidth=args.pg_bandwidth,
     )
 
-    # Run grid: prompt × guidance × seed
-    for ptxt in prompts:
-        for g in guidances:
-            # Build a FlowSampler per-guidance to guarantee cfg applied
-            fs_cfg = FlowSamplerConfig(
-                model_path=args.model,
-                device=str(device),
-                dtype=dtype,
-                steps=args.steps,
-                cfg_scale=float(g),
-                height=args.height,
-                width=args.width,
-                enable_attention_slicing=args.attention_slicing,
-            )
-            sampler = FlowSampler(fs_cfg, pg_cfg)
+    # Iterate by concept to write into outputs/{method}_{concept}/...
+    for concept, prompts in concept_to_prompts.items():
+        base_dir, eval_dir, imgs_root = _outputs_root(args.method, concept)
+        print(f"[PG] outputs base: {base_dir}")
+        print(f"[PG] eval dir:     {eval_dir}")
+        print(f"[PG] imgs root:    {imgs_root}")
 
-            for sd in args.seeds:
-                # Reproducibility per (prompt, guidance, seed)
-                seed_everything(int(sd))
-
-                out_dir = _prompt_run_dir(
-                    imgs_root=imgs_root,
-                    prompt=ptxt,
-                    seed=int(sd),
-                    guidance=float(g),
-                    steps=int(args.steps),
+        # Run grid: prompt × guidance × seed
+        for ptxt in prompts:
+            for g in guidances:
+                # Build a FlowSampler per-guidance to guarantee cfg applied
+                fs_cfg = FlowSamplerConfig(
+                    model_path=args.model,
+                    device=str(device),
+                    dtype=dtype,
+                    steps=args.steps,
+                    cfg_scale=float(g),
+                    height=args.height,
+                    width=args.width,
+                    enable_attention_slicing=args.attention_slicing,
                 )
-                print(f"[PG] sampling: prompt='{ptxt}' | seed={sd} | cfg={g} | steps={args.steps} -> {out_dir}")
+                sampler = FlowSampler(fs_cfg, pg_cfg)
 
-                images = sampler.generate(
-                    prompt=ptxt,
-                    negative_prompt=args.negative,
-                    num_images=args.G,
-                    seed=int(sd),
-                )
-                _save_images(images, out_dir, (args.width, args.height))
+                for sd in args.seeds:
+                    # Reproducibility per (prompt, guidance, seed)
+                    seed_everything(int(sd))
+
+                    out_dir = _prompt_run_dir(
+                        imgs_root=imgs_root,
+                        prompt=ptxt,
+                        seed=int(sd),
+                        guidance=float(g),
+                        steps=int(args.steps),
+                    )
+                    print(f"[PG] sampling: concept='{concept}' | prompt='{ptxt}' | seed={sd} | cfg={g} | steps={args.steps} -> {out_dir}")
+
+                    images = sampler.generate(
+                        prompt=ptxt,
+                        negative_prompt=args.negative,
+                        num_images=args.G,
+                        seed=int(sd),
+                    )
+                    _save_images(images, out_dir, (args.width, args.height))
 
     print("[PG] Done.")
 

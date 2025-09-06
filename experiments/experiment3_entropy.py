@@ -4,36 +4,32 @@
 """
 Export normalized cluster entropy (H/log k) for each {method, guidance} under one concept.
 
-Inputs
-------
-- REAL_DIR: real reference images folder for ONE concept (e.g., .../real_cls_crops/truck/)
-- OUTPUTS_ROOT: contains {method}_{concept}/imgs/{prompt}_seedXXXX_g{guidance}_s{steps}/
-               (also supports old format: {prompt}_{seed}_{guidance}_{steps})
-- PROMPTS_JSON: multi-class JSON; we only load prompts for the given --concept
-- METHODS: comma-separated list
-- GUIDANCES: e.g., "3.0,5.0,7.5"
-- k (clusters): default 10
-- steps: default 30
+This version:
+- CHANGED: No prompts_json filtering; scan ALL K-sets under imgs/.
+- CHANGED: You can pass either:
+    A) --mc_roots {outputs_root}/{method}_{concept}[, ...]   (or their .../imgs)
+    B) --outputs_root + --methods + --concept  (auto paths)
+- CHANGED: If --out_dir is omitted, each method writes to its own {method}_{concept}/eval/.
+- K-set dirname formats supported:
+    * new: {prompt}_seed{seed}_g{guidance}_s{steps}
+    * old: {prompt}_{seed}_{guidance}_{steps}
 
 Aggregation
 -----------
 For each guidance:
   per-Kset entropy -> (seed-mean per prompt) -> macro-mean over prompts
-Output one CSV containing rows for all {method, guidance} of the concept:
-  columns: method, concept, guidance, k, entropy_mean, entropy_std
+Output columns: method, concept, guidance, k, entropy_mean, entropy_std
 """
 
-import argparse, json, re, gc, difflib
+import argparse, re, gc
 from pathlib import Path
-from typing import Dict, List, Tuple
-from collections import defaultdict
+from typing import Dict, List
+from collections import defaultdict, Counter
 
 import numpy as np
 import pandas as pd
 from PIL import Image
 from tqdm import tqdm
-
-from collections import Counter
 
 # ===== CLIP features =====
 import torch
@@ -41,6 +37,7 @@ import torch.nn.functional as F
 import clip  # pip install git+https://github.com/openai/CLIP.git
 from sklearn.cluster import KMeans
 
+# ---------- utils ----------
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 def is_image(p: Path) -> bool: return p.suffix.lower() in IMG_EXTS
 def list_images(d: Path) -> List[Path]:
@@ -51,52 +48,11 @@ def free_mem():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-# ---- normalization helpers ----
-def _normalize_prompt(s: str, lower=True) -> str:
+def _normalize_prompt(s: str) -> str:
+    # for grouping same prompt across seeds
     s = s.replace(" ", "_")
     s = re.sub(r"_+", "_", s).strip("_")
-    return s.lower() if lower else s
-def _normalize_label(s: str) -> str:
-    s = s.replace("_", " ")
-    s = re.sub(r"\s+", " ", s).strip().lower()
-    return s
-
-def load_prompts_for_concept(path: Path, concept: str, lower=True) -> List[str]:
-    """Load ONLY the prompts for the given concept from a multi-class JSON."""
-    obj = json.load(open(path, "r"))
-    key = _normalize_label(concept)
-
-    def _norm(lst):
-        seen, out = set(), []
-        for p in lst:
-            q = _normalize_prompt(str(p), lower=lower)
-            if q not in seen:
-                out.append(q); seen.add(q)
-        return out
-
-    if isinstance(obj, list):
-        return _norm(obj)
-
-    if isinstance(obj, dict) and "class_prompts" in obj and isinstance(obj["class_prompts"], dict):
-        for k, v in obj["class_prompts"].items():
-            if _normalize_label(k) == key:
-                return _norm(v)
-
-    if isinstance(obj, dict):
-        if "prompts" in obj and isinstance(obj["prompts"], list):
-            return _norm(obj["prompts"])
-        for k, v in obj.items():
-            if isinstance(v, list) and _normalize_label(k) == key:
-                return _norm(v)
-
-    # Fallback (not recommended): flatten all lists
-    flat = []
-    if isinstance(obj, dict):
-        for v in obj.values():
-            if isinstance(v, list): flat += v
-    elif isinstance(obj, list):
-        flat = obj
-    return _norm(flat)
+    return s.lower()
 
 # ---- parse K-set dirnames (new & old formats) ----
 NEW_RE = re.compile(r"^(?P<prompt>.+)_seed(?P<seed>\d+)_g(?P<guidance>[-+]?\d*\.?\d+)_s(?P<steps>\d+)$")
@@ -114,80 +70,48 @@ def parse_kset_dirname(name: str):
             }
     return None
 
-# ---- prefix + fuzzy matching of prompts ----
-def match_prompt(folder_prompt_norm: str, allowed_prompts_norm: List[str], fuzzy_ratio: float) -> Tuple[bool, str]:
-    # prefix first
-    for a in allowed_prompts_norm:
-        if folder_prompt_norm.startswith(a):
-            return True, a
-    # fuzzy
-    best = None; best_score = 0.0
-    for a in allowed_prompts_norm:
-        score = difflib.SequenceMatcher(None, folder_prompt_norm, a).ratio()
-        if score > best_score:
-            best, best_score = a, score
-    if best is not None and best_score >= fuzzy_ratio:
-        return True, best
-    return False, ""
-
-def scan_ksets(gen_imgs_root: Path, allowed_prompts: List[str], target_guidances: List[float],
-               steps: int, fuzzy_ratio: float, lower=True, debug=False) -> List[Dict]:
-    allowed_norm = [_normalize_prompt(p, lower=lower) for p in allowed_prompts]
-    gd_set = set([float(g) for g in target_guidances])
-
+# ---- CHANGED: scan ALL K-sets under imgs_root (no prompt filtering) ----
+def scan_ksets_all(imgs_root: Path, target_guidances: List[float], steps: int, debug: bool=False) -> List[Dict]:
     out, unmatched = [], []
-    for d in sorted(gen_imgs_root.iterdir()):
-        if not d.is_dir(): continue
+    gd_set = set(float(g) for g in target_guidances) if target_guidances else None
+    if not imgs_root.exists():
+        if debug: print(f"[DEBUG] imgs_root not found: {imgs_root}")
+        return out
+    for d in sorted(imgs_root.iterdir()):
+        if not d.is_dir():
+            continue
         info = parse_kset_dirname(d.name)
         if not info:
             unmatched.append((d.name, "regex_mismatch"))
             continue
-
-        folder_prompt_norm = _normalize_prompt(info["prompt_raw"], lower=lower)
-        ok, canon_prompt = match_prompt(folder_prompt_norm, allowed_norm, fuzzy_ratio)
-        if not ok:
-            unmatched.append((d.name, f"prompt_not_matched:{folder_prompt_norm}"))
+        if gd_set is not None and info["guidance"] not in gd_set:
             continue
-
-        if info["guidance"] not in gd_set:  # guidance 过滤
+        if steps is not None and info["steps"] != steps:
             continue
-        if info["steps"] != steps:          # steps 过滤
-            continue
-
         imgs = list_images(d)
         if not imgs:
             unmatched.append((d.name, "no_images"))
             continue
-
         out.append({
             "dir": d,
-            "folder": d.name,                 # 新增：文件夹名
-            "prompt_raw": info["prompt_raw"], # 新增：原始 prompt 片段
-            "prompt": canon_prompt,           # canonical prompt
+            "folder": d.name,
+            "prompt_raw": info["prompt_raw"],
+            "prompt": _normalize_prompt(info["prompt_raw"]),  # grouping key
             "seed": info["seed"],
             "guidance": info["guidance"],
             "steps": info["steps"],
             "images": imgs,
-            "n_images": len(imgs),            # 新增：图片数
+            "n_images": len(imgs),
         })
-
     if debug:
-        print(f"[DEBUG] scan_ksets: matched={len(out)}, unmatched={len(unmatched)}")
-        for name, why in unmatched[:20]:
+        print(f"[DEBUG] scan_ksets_all: matched={len(out)}, unmatched={len(unmatched)}")
+        for name, why in unmatched[:30]:
             print(f"  - UNMATCHED: {name}  | {why}")
-        if len(unmatched) > 20:
-            print(f"  ... ({len(unmatched)-20} more)")
+        if len(unmatched) > 30:
+            print(f"  ... ({len(unmatched)-30} more)")
     return out
 
-    if debug:
-        print(f"[DEBUG] scan_ksets: matched={len(out)}, unmatched={len(unmatched)}")
-        for name, why in unmatched[:20]:
-            print(f"  - UNMATCHED: {name}  | {why}")
-        if len(unmatched) > 20:
-            print(f"  ... ({len(unmatched)-20} more)")
-    return out
-
-# ---- CLIP featurizer & kmeans ----
+# ---- CLIP featurizer & kmeans (fit on REAL only) ----
 class CLIPFeaturizer:
     def __init__(self, model_name="ViT-L/14@336px", device=None, batch_size=64):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -196,6 +120,8 @@ class CLIPFeaturizer:
         self.bs = batch_size
     @torch.no_grad()
     def encode_paths(self, paths: List[Path]) -> np.ndarray:
+        if not paths:
+            return np.zeros((0, 512), dtype=np.float32)
         feats = []
         for i in range(0, len(paths), self.bs):
             batch = []
@@ -218,6 +144,8 @@ def kmeans_centers(real_feats: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
 
 # ---- entropy on one K-set ----
 def entropy_for_kset(gen_feats: np.ndarray, centers: np.ndarray) -> float:
+    if gen_feats.size == 0:
+        return 0.0
     sims = gen_feats @ centers.T
     nearest = np.argmax(sims, axis=1)  # same as argmin of (1 - sims)
     k = centers.shape[0]
@@ -235,79 +163,124 @@ def aggregate_entropy(by_g_p_seed: Dict[float, Dict[str, List[float]]]) -> Dict[
         per_prompt_mean = []
         for p, lst in mp.items():
             per_prompt_mean.append(np.mean(lst))
-        ent_mu = float(np.mean(per_prompt_mean))
-        ent_sd = float(np.std (per_prompt_mean))
+        ent_mu = float(np.mean(per_prompt_mean)) if per_prompt_mean else 0.0
+        ent_sd = float(np.std (per_prompt_mean)) if per_prompt_mean else 0.0
         out[g] = {"entropy_mean": ent_mu, "entropy_std": ent_sd}
     return out
 
-# ---- main driver for one concept ----
-def run_for_concept(real_dir: Path, outputs_root: Path, concept: str,
-                    methods: List[str], prompts: List[str],
-                    guidances: List[float], steps: int,
-                    k: int, batch_size: int, device: str,
-                    fuzzy_ratio: float, out_dir: Path, debug: bool,
-                    show_matched:bool, dump_matched: Path):
+# ---- helpers: locate imgs/ and default eval/ ----
+def resolve_imgs_root(method_concept_root: Path) -> Path:
+    if (method_concept_root / "imgs").is_dir():
+        return method_concept_root / "imgs"
+    if method_concept_root.name == "imgs" and method_concept_root.is_dir():
+        return method_concept_root
+    raise FileNotFoundError(f"Cannot locate imgs/ under {method_concept_root}")
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+def default_out_dir(method_concept_root: Path) -> Path:
+    return method_concept_root / "eval"
+
+def infer_method_name(method_concept_root: Path, concept: str) -> str:
+    name = method_concept_root.name
+    suffix = f"_{concept}"
+    if name.endswith(suffix):
+        return name[: -len(suffix)]
+    return name  # fallback
+
+# ---- main driver ----
+def run(
+    real_dir: Path,
+    # Mode A: explicit list of {method}_{concept} roots (or their imgs/)
+    method_concept_roots: List[Path],
+    # Mode B: outputs_root + methods + concept
+    outputs_root: Path,
+    methods: List[str],
+    concept: str,
+    guidances: List[float],
+    steps: int,
+    k: int,
+    batch_size: int,
+    device: str,
+    out_dir: Path,   # if provided -> single combined CSV; else per-method CSV in {method}_{concept}/eval
+    debug: bool,
+    show_matched: bool,
+    dump_matched: Path,
+):
     feat = CLIPFeaturizer(device=device, batch_size=batch_size)
 
-    # real feats & kmeans
     real_imgs = list_images(real_dir)
     assert len(real_imgs) > 0, f"No real images in {real_dir}"
     real_feats = feat.encode_paths(real_imgs)
     centers = kmeans_centers(real_feats, k=k, seed=0)
 
-    rows = []  # to CSV
+    # Build task list
+    tasks = []
 
-    for method in methods:
-        gen_root = outputs_root / f"{method}_{concept}" / "imgs"
-        if not gen_root.exists():
-            print(f"[WARN] missing: {gen_root} — skip method {method}")
-            continue
+    # A: explicit roots
+    for mc_root in method_concept_roots or []:
+        mc_root = mc_root.resolve()
+        imgs_root = resolve_imgs_root(mc_root)
+        method = infer_method_name(mc_root, concept)
+        odir = (out_dir if out_dir is not None else default_out_dir(mc_root))
+        odir.mkdir(parents=True, exist_ok=True)
+        tasks.append((method, mc_root, imgs_root, odir))
 
-        ksets = scan_ksets(gen_root, prompts, guidances, steps,
-                           fuzzy_ratio=fuzzy_ratio, lower=True, debug=debug)
+    # B: outputs_root + methods
+    if outputs_root is not None and methods:
+        for m in methods:
+            mc_root = (outputs_root / f"{m}_{concept}").resolve()
+            imgs_root = resolve_imgs_root(mc_root)
+            odir = (out_dir if out_dir is not None else default_out_dir(mc_root))
+            odir.mkdir(parents=True, exist_ok=True)
+            tasks.append((m, mc_root, imgs_root, odir))
+
+    if not tasks:
+        raise ValueError("No method/concept roots to process. Provide --mc_roots or --outputs_root+--methods+--concept.")
+
+    combined_rows = []  # if --out_dir provided, we write a single CSV later
+
+    # Process each task
+    for method, mc_root, imgs_root, odir in tasks:
+        print(f"\n[RUN] concept={concept} | method={method}\n"
+              f"      real_dir  = {real_dir}\n"
+              f"      imgs_root = {imgs_root}\n"
+              f"      out_dir   = {odir}\n")
+
+        ksets = scan_ksets_all(imgs_root, guidances, steps, debug=debug)
         if not ksets:
-            print(f"[WARN] no K-sets under {gen_root} for given prompts/guidances")
+            print(f"[WARN] no K-sets under {imgs_root} that match guidances/steps")
             continue
-        
-        if ksets:
-            # 统计
-            c_guid = Counter([ks["guidance"] for ks in ksets])
-            c_prompt = Counter([ks["prompt"]   for ks in ksets])
-            total_imgs = sum(ks["n_images"] for ks in ksets)
 
-            print(f"[INFO] {concept}|{method}: matched K-sets = {len(ksets)} "
-                f"(images={total_imgs}, by_guidance={dict(sorted(c_guid.items()))})")
+        # stats about matches
+        c_guid = Counter([ks["guidance"] for ks in ksets])
+        total_imgs = sum(ks["n_images"] for ks in ksets)
+        print(f"[INFO] {concept}|{method}: matched K-sets = {len(ksets)} "
+              f"(images={total_imgs}, by_guidance={dict(sorted(c_guid.items()))})")
 
-            if show_matched:
-                print("[MATCHED] folder | prompt_raw -> prompt | seed | g | s | #imgs")
-                for ks in sorted(ksets, key=lambda x: (x["guidance"], x["prompt"], x["seed"], x["folder"])):
-                    print(f"  - {ks['folder']} | {ks['prompt_raw']} -> {ks['prompt']} | "
-                        f"{ks['seed']} | {ks['guidance']} | {ks['steps']} | {ks['n_images']}")
+        if show_matched:
+            print("[MATCHED] folder | prompt_raw(norm) | seed | g | s | #imgs")
+            for ks in sorted(ksets, key=lambda x: (x["guidance"], x["prompt"], x["seed"], x["folder"])):
+                print(f"  - {ks['folder']} | {ks['prompt_raw']} ({ks['prompt']}) | "
+                      f"{ks['seed']} | {ks['guidance']} | {ks['steps']} | {ks['n_images']}")
 
-            if dump_matched is not None:
-                dump_dir = Path(dump_matched)
-                dump_dir.mkdir(parents=True, exist_ok=True)
-                import pandas as _pd
-                _dfm = _pd.DataFrame([{
-                    "method": method,
-                    "concept": concept,
-                    "folder": ks["folder"],
-                    "prompt_raw": ks["prompt_raw"],
-                    "prompt": ks["prompt"],
-                    "seed": ks["seed"],
-                    "guidance": ks["guidance"],
-                    "steps": ks["steps"],
-                    "n_images": ks["n_images"],
-                    "abs_dir": str(ks["dir"])
-                } for ks in ksets]).sort_values(["guidance","prompt","seed","folder"])
-                out_csv_list = dump_dir / f"matched_{method}_{concept}.csv"
-                _dfm.to_csv(out_csv_list, index=False)
-                print(f"[SAVE] matched list -> {out_csv_list}")
+        if dump_matched is not None:
+            dump_dir = Path(dump_matched); dump_dir.mkdir(parents=True, exist_ok=True)
+            _dfm = pd.DataFrame([{
+                "method": method,
+                "concept": concept,
+                "folder": ks["folder"],
+                "prompt_raw": ks["prompt_raw"],
+                "prompt_norm": ks["prompt"],
+                "seed": ks["seed"],
+                "guidance": ks["guidance"],
+                "steps": ks["steps"],
+                "n_images": ks["n_images"],
+                "abs_dir": str(ks["dir"]),
+            } for ks in ksets]).sort_values(["guidance","prompt_norm","seed","folder"])
+            out_csv_list = dump_dir / f"matched_{method}_{concept}.csv"
+            _dfm.to_csv(out_csv_list, index=False)
+            print(f"[SAVE] matched list -> {out_csv_list}")
 
-        print(f"[INFO] {concept}|{method}: matched K-sets = {len(ksets)}")
-        # g -> prompt -> list of entropy over seeds
+        # g -> prompt_norm -> [entropy over seeds]
         by_g_p_seed: Dict[float, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
 
         for ks in tqdm(ksets, desc=f"[{concept}|{method}] K-sets"):
@@ -316,24 +289,30 @@ def run_for_concept(real_dir: Path, outputs_root: Path, concept: str,
             by_g_p_seed[ks["guidance"]][ks["prompt"]].append(ent)
 
         stats = aggregate_entropy(by_g_p_seed)
-        for g, st in stats.items():
-            rows.append({
-                "method": method,
-                "concept": concept,
-                "guidance": float(g),
-                "k": int(k),
-                "entropy_mean": float(st["entropy_mean"]),
-                "entropy_std":  float(st["entropy_std"]),
-            })
+        rows = [{
+            "method": method,
+            "concept": concept,
+            "guidance": float(g),
+            "k": int(k),
+            "entropy_mean": float(st["entropy_mean"]),
+            "entropy_std":  float(st["entropy_std"]),
+        } for g, st in stats.items()]
 
-    if not rows:
-        print("[WARN] nothing to save; no rows collected.")
-        return
+        if out_dir is None:
+            # per-method CSV to its own eval/
+            df = pd.DataFrame(rows).sort_values(by=["method","guidance"]).reset_index(drop=True)
+            out_csv = odir / f"exp3_entropy_{concept}.csv"
+            df.to_csv(out_csv, index=False)
+            print(f"[SAVE] {out_csv} (rows={len(df)})")
+        else:
+            combined_rows.extend(rows)
 
-    df = pd.DataFrame(rows).sort_values(by=["method","guidance"]).reset_index(drop=True)
-    out_csv = out_dir / f"exp3_entropy_{concept}.csv"
-    df.to_csv(out_csv, index=False)
-    print(f"[SAVE] {out_csv} (rows={len(df)})")
+    if out_dir is not None and combined_rows:
+        df_all = pd.DataFrame(combined_rows).sort_values(by=["method","guidance"]).reset_index(drop=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_csv = out_dir / f"exp3_entropy_{concept}.csv"
+        df_all.to_csv(out_csv, index=False)
+        print(f"[SAVE] {out_csv} (rows={len(df_all)})")
 
 # ---- CLI ----
 def parse_floats(s: str) -> List[float]:
@@ -342,42 +321,54 @@ def parse_floats(s: str) -> List[float]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--real_dir", type=Path, required=True, help="real reference folder for ONE concept")
-    ap.add_argument("--outputs_root", type=Path, required=True, help="root containing {method}_{concept}/imgs/")
-    ap.add_argument("--concept", type=str, required=True)
-    ap.add_argument("--methods", type=str, required=True, help="comma-separated methods")
-    ap.add_argument("--prompts_json", type=Path, required=True, help="multi-class prompts JSON")
-    ap.add_argument("--guidances", type=str, required=True, help="comma-separated guidances, e.g. '3.0,5.0,7.5'")
+
+    # Mode A: pass one or more {outputs_root}/{method}_{concept} roots (or their imgs)
+    ap.add_argument("--mc_roots", type=str, default="",
+                    help="comma-separated paths to {method}_{concept} roots (or .../imgs)")
+
+    # Mode B: auto paths
+    ap.add_argument("--outputs_root", type=Path, default=None, help="root containing {method}_{concept}/")
+    ap.add_argument("--concept", type=str, default=None)
+    ap.add_argument("--methods", type=str, default="", help="comma-separated methods")
+
+    ap.add_argument("--guidances", type=str, required=True, help="e.g. '3.0,5.0,7.5'")
     ap.add_argument("--steps", type=int, default=30)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--device", type=str, default=None)
-    ap.add_argument("--fuzzy_ratio", type=float, default=0.85)
-    ap.add_argument("--out_dir", type=Path, required=True)
+
+    # Output: if omitted -> per-method {method}_{concept}/eval/
+    ap.add_argument("--out_dir", type=Path, default=None,
+                    help="if provided, write ONE combined CSV here; else per-method CSVs")
+
     ap.add_argument("--debug", type=int, default=0)
     ap.add_argument("--show_matched", type=int, default=1)
     ap.add_argument("--dump_matched", type=Path, default=None)
     args = ap.parse_args()
 
-    prompts = load_prompts_for_concept(args.prompts_json, args.concept, lower=True)
+    # Parse inputs
+    mc_roots = [Path(x.strip()) for x in args.mc_roots.split(",") if x.strip()]
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
     guidances = parse_floats(args.guidances)
 
-    run_for_concept(
+    if not mc_roots and (args.outputs_root is None or not methods or not args.concept):
+        raise ValueError("Provide either --mc_roots, or --outputs_root + --methods + --concept.")
+
+    run(
         real_dir=args.real_dir,
+        method_concept_roots=mc_roots,
         outputs_root=args.outputs_root,
-        concept=args.concept,
         methods=methods,
-        prompts=prompts,
+        concept=args.concept,
         guidances=guidances,
         steps=args.steps,
         k=args.k,
         batch_size=args.batch_size,
         device=args.device,
-        fuzzy_ratio=float(args.fuzzy_ratio),
         out_dir=args.out_dir,
         debug=bool(args.debug),
         show_matched=bool(args.show_matched),
-        dump_matched=args.dump_matched
+        dump_matched=args.dump_matched,
     )
 
 if __name__ == "__main__":

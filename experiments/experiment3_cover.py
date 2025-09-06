@@ -4,22 +4,15 @@
 """
 E3 Figure 1: Coverage–τ curves (k=10, τ in {0.3,0.45,0.6,0.75,0.9})
 
-目录假设：
-  REAL_DIR/                        # 单个 concept 的真实图像文件夹（裁剪或整图均可）
-  OUTPUTS_ROOT/{method}_{concept}/imgs/
-      {prompt}_seed1111_g3.0_s30/  # ← 兼容这种新格式（也兼容老格式 {prompt}_{seed}_{guidance}_{steps}）
-      ...
-
-Prompt 匹配：
-  - 先把 JSON 和目录里的 prompt 都“规范化”（空格→下划线，合并多下划线，去首尾下划线，小写）
-  - 用“前缀匹配 + 模糊匹配（difflib ratio ≥ 阈值）”，能稳住轻微拼写错误（如 a_trcuk）
-
-输出（按 guidance 一份）：
-  out_dir/exp3_{guidance}_{concept}.csv
-  列：method,concept,guidance,k,tau,coverage_mean,coverage_std
+本版改动
+-------
+- CHANGED: 不再根据 prompts_json 过滤；直接处理 imgs 下所有 K-set 目录。
+- CHANGED: 支持直接传入 {outputs_root}/{method}_{concept}/ 乃至 {method}_{concept}/imgs。
+- CHANGED: 若未显式提供 --out_dir，则默认写入 {method_concept_root}/eval/。
+- 兼容新旧两种 K-set 命名（见正则）。
 """
 
-import argparse, json, re, gc, difflib
+import argparse, re, gc
 from pathlib import Path
 from typing import Dict, List, Tuple
 from collections import defaultdict
@@ -46,53 +39,6 @@ def free_mem():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-# -------- 规范化 --------
-def _normalize_prompt(s: str, lower=True) -> str:
-    s = s.replace(" ", "_")
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s.lower() if lower else s
-
-def _normalize_label(s: str) -> str:
-    s = s.replace("_", " ")
-    s = re.sub(r"\s+", " ", s).strip().lower()
-    return s
-
-def load_prompts_for_concept(path: Path, concept: str, lower=True) -> List[str]:
-    obj = json.load(open(path, "r"))
-    key = _normalize_label(concept)
-
-    def _norm(lst):
-        seen, out = set(), []
-        for p in lst:
-            q = _normalize_prompt(str(p), lower=lower)
-            if q not in seen:
-                out.append(q); seen.add(q)
-        return out
-
-    if isinstance(obj, list):
-        return _norm(obj)
-
-    if isinstance(obj, dict) and "class_prompts" in obj and isinstance(obj["class_prompts"], dict):
-        for k, v in obj["class_prompts"].items():
-            if _normalize_label(k) == key:
-                return _norm(v)
-
-    if isinstance(obj, dict):
-        if "prompts" in obj and isinstance(obj["prompts"], list):
-            return _norm(obj["prompts"])
-        for k, v in obj.items():
-            if isinstance(v, list) and _normalize_label(k) == key:
-                return _norm(v)
-
-    # 兜底 flatten（不推荐）
-    flat = []
-    if isinstance(obj, dict):
-        for v in obj.values():
-            if isinstance(v, list): flat += v
-    elif isinstance(obj, list):
-        flat = obj
-    return _norm(flat)
-
 # -------- 解析目录名：支持两种格式 --------
 # 新：{prompt}_seed{seed}_g{guidance}_s{steps}
 NEW_RE = re.compile(r"^(?P<prompt>.+)_seed(?P<seed>\d+)_g(?P<guidance>[-+]?\d*\.?\d+)_s(?P<steps>\d+)$")
@@ -100,87 +46,53 @@ NEW_RE = re.compile(r"^(?P<prompt>.+)_seed(?P<seed>\d+)_g(?P<guidance>[-+]?\d*\.
 OLD_RE = re.compile(r"^(?P<prompt>.+)_(?P<seed>\d+?)_(?P<guidance>[-+]?\d*\.?\d+?)_(?P<steps>\d+?)$")
 
 def parse_kset_dirname(name: str):
-    for pat, tag in ((NEW_RE, "new"), (OLD_RE, "old")):
+    for pat in (NEW_RE, OLD_RE):
         m = pat.match(name)
         if m:
             return {
-                "prompt_raw": m.group("prompt"),
+                "prompt": m.group("prompt"),
                 "seed": int(m.group("seed")),
                 "guidance": float(m.group("guidance")),
                 "steps": int(m.group("steps")),
-                "fmt": tag
             }
     return None
 
-# -------- 前缀 + 模糊匹配 --------
-def match_prompt(folder_prompt_norm: str, allowed_prompts_norm: List[str], fuzzy_ratio: float) -> Tuple[bool, str]:
-    """
-    返回 (是否匹配成功, 匹配到的 canonical prompt)
-    规则：
-      1) 前缀匹配：folder_prompt 以 allowed 开头
-      2) 模糊匹配：difflib.SequenceMatcher ratio >= fuzzy_ratio
-    """
-    # 1) 前缀
-    for a in allowed_prompts_norm:
-        if folder_prompt_norm.startswith(a):
-            return True, a
-    # 2) 模糊：取最相近的一个看阈值
-    best = None; best_score = 0.0
-    for a in allowed_prompts_norm:
-        score = difflib.SequenceMatcher(None, folder_prompt_norm, a).ratio()
-        if score > best_score:
-            best, best_score = a, score
-    if best is not None and best_score >= fuzzy_ratio:
-        return True, best
-    return False, ""
-
-def scan_ksets(gen_imgs_root: Path,
-               allowed_prompts: List[str],
-               target_guidances: List[float],
-               steps: int,
-               fuzzy_ratio: float,
-               lower=True,
-               debug=False) -> List[Dict]:
-    allowed_norm = [_normalize_prompt(p, lower=lower) for p in allowed_prompts]
-    gd_set = set([float(g) for g in target_guidances])
-
+# -------- CHANGED: 扫描 imgs 下所有 K-set，不做 prompt 过滤 --------
+def scan_ksets_all(imgs_root: Path,
+                   target_guidances: List[float],
+                   steps: int,
+                   debug: bool=False) -> List[Dict]:
     out, unmatched = [], []
-    for d in sorted(gen_imgs_root.iterdir()):
-        if not d.is_dir(): continue
+    gd_set = set(float(g) for g in target_guidances) if target_guidances else None
+    if not imgs_root.exists():
+        return out
+    for d in sorted(imgs_root.iterdir()):
+        if not d.is_dir(): 
+            continue
         info = parse_kset_dirname(d.name)
         if not info:
             unmatched.append((d.name, "regex_mismatch"))
             continue
-
-        folder_prompt_norm = _normalize_prompt(info["prompt_raw"], lower=lower)
-        ok, canon_prompt = match_prompt(folder_prompt_norm, allowed_norm, fuzzy_ratio)
-        if not ok:
-            unmatched.append((d.name, f"prompt_not_matched:{folder_prompt_norm}"))
+        if gd_set is not None and info["guidance"] not in gd_set:
             continue
-
-        if info["guidance"] not in gd_set:
+        if steps is not None and info["steps"] != steps:
             continue
-        if info["steps"] != steps:
-            continue
-
         imgs = list_images(d)
         if not imgs:
             unmatched.append((d.name, "no_images"))
             continue
-
         out.append({
             "dir": d,
-            "prompt": canon_prompt,          # 用“匹配到的规范 prompt”做聚合键
+            "prompt": info["prompt"],
             "seed": info["seed"],
             "guidance": info["guidance"],
             "steps": info["steps"],
             "images": imgs
         })
-
     if debug:
-        print(f"[DEBUG] scan_ksets: matched={len(out)}, unmatched={len(unmatched)}")
+        print(f"[DEBUG] scan_ksets_all: matched={len(out)}, unmatched={len(unmatched)}")
         for name, why in unmatched[:20]:
-            print(f"  - UNMATCHED: {name}  | {why}")
+            print(f"  - UNMATCHED: {name} | {why}")
         if len(unmatched) > 20:
             print(f"  ... ({len(unmatched)-20} more)")
     return out
@@ -206,7 +118,7 @@ class CLIPFeaturizer:
             f = F.normalize(f.float(), dim=-1)
             feats.append(f.cpu().numpy())
         free_mem()
-        return np.concatenate(feats, axis=0)
+        return np.concatenate(feats, axis=0) if feats else np.zeros((0, 512), dtype=np.float32)
 
 def kmeans_centers(real_feats: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
     km = KMeans(n_clusters=k, random_state=seed, n_init=10)
@@ -216,6 +128,8 @@ def kmeans_centers(real_feats: np.ndarray, k: int, seed: int = 0) -> np.ndarray:
     return C
 
 def coverage_for_kset(gen_feats: np.ndarray, centers: np.ndarray, taus: List[float]) -> np.ndarray:
+    if gen_feats.size == 0:
+        return np.zeros(len(taus), dtype=np.float64)
     sims = gen_feats @ centers.T
     dists = 1.0 - sims
     nearest = np.argmin(dists, axis=1)
@@ -244,16 +158,44 @@ def aggregate(by_g_p_seed: Dict[float, Dict[str, List[np.ndarray]]], taus: List[
         out[g] = {"taus": taus, "cov_mu": cov_mu, "cov_sd": cov_sd}
     return out
 
-# -------- 主流程 --------
-def run_for_concept(real_dir: Path, outputs_root: Path, concept: str,
-                    methods: List[str], prompts: List[str],
-                    guidances: List[float], steps: int,
-                    k: int, taus: List[float],
-                    batch_size: int, device: str,
-                    fuzzy_ratio: float,
-                    out_dir: Path, debug: bool):
+# -------- 小工具：推断 imgs/ 与 out_dir --------
+def resolve_imgs_root(method_concept_root: Path) -> Path:
+    """优先找 {root}/imgs；若传入的就是 imgs 目录也可用。否则报错。"""
+    if (method_concept_root / "imgs").is_dir():
+        return method_concept_root / "imgs"
+    if method_concept_root.name == "imgs" and method_concept_root.is_dir():
+        return method_concept_root
+    raise FileNotFoundError(f"Cannot locate imgs/ under {method_concept_root}")
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+def default_out_dir(method_concept_root: Path) -> Path:
+    return method_concept_root / "eval"
+
+def infer_method_name(method_concept_root: Path, concept: str) -> str:
+    """从 {method}_{concept} 目录名推断 method；失败则用目录名回退。"""
+    name = method_concept_root.name
+    suffix = f"_{concept}"
+    if name.endswith(suffix):
+        return name[: -len(suffix)]
+    return name  # 回退
+
+# -------- 主流程（支持两种输入方式） --------
+def run(
+    real_dir: Path,
+    # 方式 A：直接传入若干个 {method}_{concept} 根目录
+    method_concept_roots: List[Path],
+    # 方式 B：给 outputs_root + methods + concept（自动拼路径）
+    outputs_root: Path,
+    methods: List[str],
+    concept: str,
+    guidances: List[float],
+    steps: int,
+    k: int,
+    taus: List[float],
+    batch_size: int,
+    device: str,
+    out_dir: Path,    # 若为 None，则各自默认到 {method}_{concept}/eval
+    debug: bool,
+):
     feat = CLIPFeaturizer(device=device, batch_size=batch_size)
 
     real_imgs = list_images(real_dir)
@@ -261,18 +203,39 @@ def run_for_concept(real_dir: Path, outputs_root: Path, concept: str,
     real_feats = feat.encode_paths(real_imgs)
     centers = kmeans_centers(real_feats, k=k, seed=0)
 
-    per_guidance_rows: Dict[float, List[dict]] = defaultdict(list)
+    # 统一整理成 [(method_name, method_concept_root, imgs_root, out_dir_for_this_method)]
+    tasks = []
 
-    for method in methods:
-        gen_root = outputs_root / f"{method}_{concept}" / "imgs"
-        if not gen_root.exists():
-            print(f"[WARN] missing: {gen_root} — skip method {method}")
-            continue
+    # A：显式给定若干 {method}_{concept} 根目录
+    for mc_root in method_concept_roots or []:
+        mc_root = mc_root.resolve()
+        imgs_root = resolve_imgs_root(mc_root)
+        method = infer_method_name(mc_root, concept)
+        odir = out_dir if out_dir is not None else default_out_dir(mc_root)  # CHANGED
+        odir.mkdir(parents=True, exist_ok=True)
+        tasks.append((method, mc_root, imgs_root, odir))
 
-        ksets = scan_ksets(gen_root, prompts, guidances, steps,
-                           fuzzy_ratio=fuzzy_ratio, lower=True, debug=debug)
+    # B：给 outputs_root + methods + concept
+    if outputs_root is not None and methods:
+        for m in methods:
+            mc_root = (outputs_root / f"{m}_{concept}").resolve()
+            imgs_root = resolve_imgs_root(mc_root)
+            odir = out_dir if out_dir is not None else default_out_dir(mc_root)  # CHANGED
+            odir.mkdir(parents=True, exist_ok=True)
+            tasks.append((m, mc_root, imgs_root, odir))
+
+    if not tasks:
+        raise ValueError("No method/concept roots to process. Provide --mc_roots or --outputs_root+--methods+--concept.")
+
+    # 逐任务计算
+    for method, mc_root, imgs_root, odir in tasks:
+        print(f"\n[RUN] concept={concept} | method={method}\n"
+              f"      real_dir   = {real_dir}\n"
+              f"      imgs_root  = {imgs_root}\n"
+              f"      out_dir    = {odir}\n")
+        ksets = scan_ksets_all(imgs_root, guidances, steps, debug=debug)
         if not ksets:
-            print(f"[WARN] no K-sets under {gen_root} for given prompts/guidances")
+            print(f"[WARN] No K-sets under {imgs_root} that match guidances/steps.")
             continue
 
         # g -> prompt -> [coverage_vec] over seeds
@@ -285,9 +248,11 @@ def run_for_concept(real_dir: Path, outputs_root: Path, concept: str,
 
         stats = aggregate(by_g_p_seed, taus)
 
+        # 按 guidance 各写一个 CSV（放该 method 的 out_dir 下）
         for g, st in stats.items():
+            rows = []
             for t, mu, sd in zip(st["taus"], st["cov_mu"], st["cov_sd"]):
-                per_guidance_rows[g].append({
+                rows.append({
                     "method": method,
                     "concept": concept,
                     "guidance": float(g),
@@ -296,13 +261,10 @@ def run_for_concept(real_dir: Path, outputs_root: Path, concept: str,
                     "coverage_mean": float(mu),
                     "coverage_std": float(sd),
                 })
-
-    # 保存每个 guidance 的 CSV
-    for g, rows in per_guidance_rows.items():
-        df = pd.DataFrame(rows).sort_values(by=["method", "tau"]).reset_index(drop=True)
-        out_csv = out_dir / f"exp3_{g}_{concept}.csv"
-        df.to_csv(out_csv, index=False)
-        print(f"[SAVE] {out_csv}  (rows={len(df)})")
+            df = pd.DataFrame(rows).sort_values(by=["method", "tau"]).reset_index(drop=True)
+            out_csv = odir / f"exp3_{g}_{concept}.csv"
+            df.to_csv(out_csv, index=False)
+            print(f"[SAVE] {out_csv}  (rows={len(df)})")
 
 # -------- CLI --------
 def parse_floats(s: str) -> List[float]:
@@ -311,39 +273,50 @@ def parse_floats(s: str) -> List[float]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--real_dir", type=Path, required=True, help="真实参考（单 concept）图像文件夹")
-    ap.add_argument("--outputs_root", type=Path, required=True, help="生成根目录，含 {method}_{concept}/imgs/")
-    ap.add_argument("--concept", type=str, required=True)
-    ap.add_argument("--methods", type=str, required=True, help="逗号分隔的方法名")
-    ap.add_argument("--prompts_json", type=Path, required=True, help="多类 JSON；只会取当前 concept 的 5 条")
+
+    ap.add_argument("--mc_roots", type=str, default="", 
+                    help="逗号分隔的 {outputs_root}/{method}_{concept} 路径（或其 imgs 目录）")
+
+    ap.add_argument("--outputs_root", type=Path, default=None, help="生成根目录，含 {method}_{concept}/")
+    ap.add_argument("--concept", type=str, default=None)
+    ap.add_argument("--methods", type=str, default="", help="逗号分隔的方法名")
+
     ap.add_argument("--guidances", type=str, required=True, help="逗号分隔 guidance，如 '5.0' 或 '3.0,5.0,7.5'")
     ap.add_argument("--steps", type=int, default=30)
     ap.add_argument("--k", type=int, default=10)
-    ap.add_argument("--taus", type=str, default="0.3,0.45,0.6,0.75,0.9")
+    ap.add_argument("--taus", type=str, default="0.05,0.20,0.35,0.50,0.65,0.80,0.95")
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--device", type=str, default=None)
-    ap.add_argument("--fuzzy_ratio", type=float, default=0.85, help="模糊匹配阈值，0~1，越大越严格")
-    ap.add_argument("--out_dir", type=Path, required=True)
+    ap.add_argument("--out_dir", type=Path, default=None, 
+                    help="default is {method}_{concept}/eval/")
     ap.add_argument("--debug", type=int, default=0, help="1=打印未匹配样例")
+
     args = ap.parse_args()
 
-    prompts = load_prompts_for_concept(args.prompts_json, args.concept, lower=True)
+    mc_roots = []
+    if args.mc_roots.strip():
+        mc_roots = [Path(x.strip()) for x in args.mc_roots.split(",") if x.strip()]
+        if args.concept is None:
+            name = mc_roots[0].name if mc_roots else ""
+            if not args.concept:
+                raise ValueError("Please provide --concept when using --mc_roots (用于推断 method 名与输出命名)。")
+
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
     guidances = parse_floats(args.guidances)
     taus = parse_floats(args.taus)
 
-    run_for_concept(
+    run(
         real_dir=args.real_dir,
+        method_concept_roots=mc_roots,
         outputs_root=args.outputs_root,
-        concept=args.concept,
         methods=methods,
-        prompts=prompts,
+        concept=args.concept,
         guidances=guidances,
         steps=args.steps,
         k=args.k,
         taus=taus,
         batch_size=args.batch_size,
         device=args.device,
-        fuzzy_ratio=float(args.fuzzy_ratio),
         out_dir=args.out_dir,
         debug=bool(args.debug),
     )

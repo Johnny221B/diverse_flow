@@ -158,6 +158,23 @@ def _generators_for_K(exec_device: str, base_seed: int, K: int) -> List[torch.Ge
     return [torch.Generator(device=exec_device).manual_seed(int(base_seed) + i) for i in range(K)]
 
 
+def _wrap_cads_move_latents_to_vae(cads, pipe, fallback_steps: int):
+    """
+    包一层 CADS 回调：在最后一步把 latents 移到 VAE 的 device/dtype。
+    只改设备，不改数值。
+    """
+    def _cb(ppl, i, t, kw):
+        out = cads(ppl, i, t, kw)  # CADS 原回调
+        lat = out.get("latents", None)
+        if lat is not None:
+            num_steps = getattr(ppl.scheduler, "num_inference_steps", None) or int(fallback_steps)
+            if (i + 1) == int(num_steps):
+                vae = ppl.vae
+                vae_dtype = next(vae.parameters()).dtype
+                out["latents"] = lat.to(device=vae.device, dtype=vae_dtype, non_blocking=True)
+        return out
+    return _cb
+
 # ---------------------------
 # Robust SD3.5 loader（原样）
 # ---------------------------
@@ -346,6 +363,9 @@ def main():
                     dynamic_cfg=bool(args.dynamic_cfg),
                     seed=int(args.seeds[0] if args.seeds else 1234),
                 )
+                
+                _cb = _wrap_cads_move_latents_to_vae(cads, pipe, fallback_steps=args.steps)
+                
                 for sd in args.seeds:
                     gens = _generators_for_K(exec_dev, int(sd), int(args.G))
                     _log(f"[CADS] sampling: concept='{concept}' | prompt='{ptxt}' | seed={sd} | guidance={g} | steps={args.steps} -> {run_dir}")
@@ -358,7 +378,7 @@ def main():
                             num_inference_steps=int(args.steps),
                             guidance_scale=float(g),
                             generator=gens,
-                            callback_on_step_end=cads,
+                            callback_on_step_end=_cb,
                             callback_on_step_end_tensor_inputs=["latents"],
                             output_type="pil",
                         )
@@ -370,7 +390,7 @@ def main():
                             num_inference_steps=int(args.steps),
                             guidance_scale=float(g),
                             generator=gens,
-                            callback_on_step_end=cads,
+                            callback_on_step_end=_cb,
                             callback_on_step_end_tensor_inputs=["latents"],
                             output_type="pil",
                         )

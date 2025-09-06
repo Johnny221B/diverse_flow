@@ -264,7 +264,6 @@ def run_for_method(
 
 # --------- path helpers ---------
 def resolve_real_dir(dataset_root: Path, concept: str) -> Path:
-    """尝试 {root}/{concept}、{root}/{concept_underscore} 两种形式，返回存在且有图的一项。"""
     cands = [dataset_root / concept, dataset_root / concept.replace(" ", "_")]
     for p in cands:
         if list_images(p):
@@ -313,7 +312,6 @@ def main():
         print("[INFO] --prompts_json is provided but ignored in this version.")
 
     for method in methods:
-        # 逐方法确定路径
         if args.real_dir and args.imgs_root and args.out_dir:
             real_dir  = args.real_dir
             imgs_root = args.imgs_root

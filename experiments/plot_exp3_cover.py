@@ -1,57 +1,112 @@
 # plot_cov_tau.py
 import argparse
 from pathlib import Path
+import math
 import pandas as pd
 import matplotlib.pyplot as plt
 
+def _guidance_name_candidates(g):
+    """
+    尝试多种字符串形式以匹配不同保存方式：
+    例如 3.0 -> ["3.0", "3", "3.00", "3.000", "3.0000"]
+    """
+    cands = []
+    if isinstance(g, str):
+        try:
+            gv = float(g)
+        except ValueError:
+            # 字符串直接用
+            return [g]
+    else:
+        gv = float(g)
+
+    # 原样
+    cands.append(str(g))
+    # 1~4 位小数
+    for dp in (1, 2, 3, 4):
+        cands.append(f"{gv:.{dp}f}")
+    # 纯整数（如果接近整数）
+    if math.isclose(gv, round(gv), rel_tol=0, abs_tol=1e-9):
+        cands.append(str(int(round(gv))))
+    # 去重保序
+    seen, out = set(), []
+    for s in cands:
+        if s not in seen:
+            out.append(s); seen.add(s)
+    return out
+
+def _build_csv_path(outputs_root: Path, method: str, concept: str, guidance) -> Path | None:
+    """
+    根据 root/method_concept/eval/exp3_guidance_concept.csv 规则，尝试多种 guidance 命名。
+    找到存在的文件就返回；找不到返回 None。
+    """
+    mc_root = outputs_root / f"{method}_{concept}"
+    eval_dir = mc_root / "eval"
+    for gname in _guidance_name_candidates(guidance):
+        cand = eval_dir / f"exp3_{gname}_{concept}.csv"
+        if cand.is_file():
+            return cand
+    return None
+
 def plot_cov_tau(
-    csv_paths,
-    concept: str = None,
-    guidance: float = None,
-    title: str = None,
-    save_path: str = None,
+    outputs_root: str | Path,
+    concept: str,
+    methods: list[str],
+    guidance,
+    title: str | None = None,
+    save_path: str | None = None,
     show_std: bool = True,
-    method_order=None,
+    method_order: list[str] | None = None,
 ):
     """
-    读取一个或多个 'exp3_{guidance}_{concept}.csv' 并绘制 Coverage–τ 曲线。
+    自动读取多方法的 exp3_{guidance}_{concept}.csv 并绘制 Coverage–τ 曲线。
     期望列：method, concept, guidance, k, tau, coverage_mean, coverage_std
     """
-    # 1) 读入并合并
-    if isinstance(csv_paths, (str, Path)):
-        csv_paths = [csv_paths]
+    outputs_root = Path(outputs_root)
+    csv_paths = []
+    for m in methods:
+        p = _build_csv_path(outputs_root, m, concept, guidance)
+        if p is None:
+            print(f"[WARN] 找不到 CSV：{outputs_root}/{m}_{concept}/eval/exp3_*_{concept}.csv (guidance={guidance}) — 跳过 {m}")
+        else:
+            csv_paths.append((m, p))
+
+    if not csv_paths:
+        raise FileNotFoundError("一个 CSV 都没找到。请检查 outputs_root / concept / methods / guidance 是否匹配。")
+
+    # 读入并合并
     frames = []
-    for p in csv_paths:
+    for m, p in csv_paths:
         df = pd.read_csv(p)
+        # 只保留与 concept/guidance 匹配的数据，防止误读到别的
+        df = df[(df["concept"].astype(str).str.lower() == concept.lower()) &
+                (df["guidance"].astype(float) == float(guidance))]
+        if df.empty:
+            print(f"[WARN] 文件存在但过滤后为空：{p}")
+            continue
         df["__src__"] = str(p)
         frames.append(df)
+
+    if not frames:
+        raise ValueError("过滤后没有数据（检查 CSV 内容中的 concept/guidance 列）。")
+
     df = pd.concat(frames, ignore_index=True)
-
-    # 2) 过滤 concept / guidance（如果指定）
-    if concept is not None:
-        df = df[df["concept"].astype(str).str.lower() == str(concept).lower()]
-    if guidance is not None:
-        df = df[df["guidance"].astype(float) == float(guidance)]
-
-    if df.empty:
-        raise ValueError("过滤后没有数据（检查 concept / guidance / CSV 内容）")
-
-    # 3) 基本检查：guidance 是否一致
-    guids = sorted(df["guidance"].unique())
-    if len(guids) > 1:
-        print(f"[WARN] 读入了多个 guidance: {guids}，将全部画在同一图上（如果只想要单一 guidance，请设置 guidance=...）")
-
-    # 4) 排序并去重（防止重复读入同一方法同一行）
+    # 排序去重
     df = df.sort_values(["method", "tau"]).drop_duplicates(["method","tau","guidance","concept"])
 
-    # 5) 画图
-    fig, ax = plt.subplots(figsize=(6,4.2), dpi=140)
+    # 方法顺序：默认按传入 methods 的顺序
+    if method_order:
+        methods_plot = [m for m in method_order if m in set(df["method"])]
+    else:
+        # 用调用方传入的 methods 顺序（若某个方法在 df 中不存在会自动跳过）
+        methods_plot = [m for m, _ in csv_paths if m in set(df["method"])]
 
-    # 方法顺序
-    methods = list(df["method"].unique()) if method_order is None else [m for m in method_order if m in set(df["method"])]
-
-    for m in methods:
+    # 画图
+    fig, ax = plt.subplots(figsize=(6, 4.2), dpi=140)
+    for m in methods_plot:
         sub = df[df["method"] == m].sort_values("tau")
+        if sub.empty:
+            continue
         x = sub["tau"].astype(float).values
         y = sub["coverage_mean"].astype(float).values
         ax.plot(x, y, marker="o", label=m)
@@ -63,12 +118,10 @@ def plot_cov_tau(
     ax.set_ylabel("coverage")
     ax.set_ylim(0.0, 1.0)
     ax.grid(True, alpha=0.3)
+
     # 标题
     if title is None:
-        tt = []
-        if concept: tt.append(f"concept={concept}")
-        if guidance is not None: tt.append(f"guidance={guidance}")
-        title = "Coverage–τ " + (" | ".join(tt) if tt else "")
+        title = f"Coverage–τ | concept={concept} | guidance={guidance}"
     ax.set_title(title)
     ax.legend(loc="best", frameon=False)
 
@@ -83,21 +136,25 @@ def plot_cov_tau(
 
 def _main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", nargs="+", required=True, help="一个或多个 exp3_{guidance}_{concept}.csv 路径")
-    ap.add_argument("--concept", type=str, default=None, help="可选：只画某个 concept")
-    ap.add_argument("--guidance", type=float, default=None, help="可选：只画某个 guidance（如 5.0）")
+    ap.add_argument("--concept", required=True, type=str, help="concept 名（如 truck）")
+    ap.add_argument("--methods", required=True, type=str, help="逗号分隔方法名（如 dpp,pg,cads）")
+    ap.add_argument("--guidance", required=True, type=str, help="guidance（如 5.0）")
+    ap.add_argument("--outputs_root", type=str, default="/mnt/data/flow_grpo/flow_base/outputs",
+                    help="根目录，默认 /mnt/data/flow_grpo/flow_base/outputs")
     ap.add_argument("--title", type=str, default=None)
     ap.add_argument("--out", type=str, default=None, help="若提供则保存到该路径；否则直接显示")
     ap.add_argument("--no_std", action="store_true", help="不画 ±std 阴影")
-    ap.add_argument("--method_order", type=str, default=None, help="逗号分隔的方法顺序")
+    ap.add_argument("--method_order", type=str, default=None, help="逗号分隔的方法顺序（可选）")
     args = ap.parse_args()
 
+    methods = [s.strip() for s in args.methods.split(",") if s.strip()]
     method_order = [s.strip() for s in args.method_order.split(",")] if args.method_order else None
 
     plot_cov_tau(
-        csv_paths=args.csv,
+        outputs_root=args.outputs_root,
         concept=args.concept,
-        guidance=args.guidance,
+        methods=methods,
+        guidance=args.guidance,  # 保留字符串以提升文件名匹配成功率
         title=args.title,
         save_path=args.out,
         show_std=not args.no_std,

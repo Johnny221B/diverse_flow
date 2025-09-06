@@ -45,14 +45,37 @@ class DiverseFlowSampler:
             if (gamma_sched > 0.0) and use_div:
                 x_pred = (x + dt * v).detach().requires_grad_(True)
                 loss, grad_pred, vlogs = self.vol.volume_loss_and_grad(x_pred)
+                # g_proj = project_partial_orth(grad_pred.detach(), v.detach(), cfg.partial_ortho)
                 g_proj = project_partial_orth(grad_pred.detach(), v.detach(), cfg.partial_ortho)
+                beta_gate = sched_factor(
+                    t,
+                    cfg.t_gate if cfg.noise_use_same_gate else cfg.noise_t_gate,
+                    cfg.sched_shape
+                )
+                beta = cfg.noise_beta0 * beta_gate
+                if beta > 0.0:
+                    xi = torch.randn_like(g_proj)
+                    xi = project_partial_orth(xi, v.detach(), 1.0)    
+                    noise_vel = ((2.0 * beta) / max(dt, 1e-8))**0.5 * xi
+                    h = g_proj + noise_vel
+                else:
+                    h = g_proj
+                # v_norm = batched_norm(v.detach())
+                # g_norm = batched_norm(g_proj.detach())
+                # cap = cfg.gamma_max_ratio * v_norm
+                # scale = torch.minimum(torch.ones_like(cap), cap / (g_norm + 1e-12))
+                # delta = (gamma_sched * scale.view(-1,1,1,1)) * g_proj.detach()
+                # gamma_eff_scalar = float(gamma_sched)
+                # last_delta = delta.detach()
                 v_norm = batched_norm(v.detach())
-                g_norm = batched_norm(g_proj.detach())
+                h_norm = batched_norm(h.detach())
                 cap = cfg.gamma_max_ratio * v_norm
-                scale = torch.minimum(torch.ones_like(cap), cap / (g_norm + 1e-12))
-                delta = (gamma_sched * scale.view(-1,1,1,1)) * g_proj.detach()
+                scale = torch.minimum(torch.ones_like(cap), cap / (h_norm + 1e-12))
+                
+                delta = (gamma_sched * scale.view(-1,1,1,1)) * h
                 gamma_eff_scalar = float(gamma_sched)
                 last_delta = delta.detach()
+                
                 logs_all["logdet"].append(vlogs["logdet"])
                 logs_all["loss"].append(vlogs["loss"])
                 logs_all["min_angle_deg"].append(vlogs["min_angle_deg"])

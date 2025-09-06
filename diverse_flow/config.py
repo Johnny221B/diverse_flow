@@ -25,3 +25,6 @@ class DiversityConfig:
     angle_gate_deg: Optional[float] = None # None disables angle gating
     leverage_alpha: float = 0.0 # >0 enables leverage weights
     device: Optional[torch.device] = None
+    noise_beta0: float = 0.0                     
+    noise_use_same_gate: bool = True             
+    noise_t_gate: Tuple[float,float] = (0.0, 0.7)

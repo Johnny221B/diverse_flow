@@ -58,7 +58,7 @@ class DiverseFlowSampler:
                 logs_all["min_angle_deg"].append(vlogs["min_angle_deg"])
                 logs_all["mean_angle_deg"].append(vlogs["mean_angle_deg"])
             else:
-                delta = last_delta if gamma_sched>0 else torch.zeros_like(x)
+                delta = 0.1*last_delta if gamma_sched>0 else torch.zeros_like(x)
                 logs_all["logdet"].append(float("nan"))
                 logs_all["loss"].append(float("nan"))
                 logs_all["min_angle_deg"].append(float("nan"))

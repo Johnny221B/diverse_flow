@@ -1,0 +1,1431 @@
+{
+    "concept": "bus",
+    "coarse_dense_prompts": [
+        {
+            "coco_seed_caption": "A yellow bus stopping at a bus stop in a city.",
+            "coarse_prompt": "A bus stopping at a bus stop in a city.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus stopping at a bus stop in a city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus stopping at a bus stop in a city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus stopping at a bus stop in a city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus stopping at a bus stop in a city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus stopping at a bus stop in a city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus stopping at a bus stop in a city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus stopping at a bus stop in a city."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus pulls over to the curb close to an intersection.",
+            "coarse_prompt": "A bus pulls over to the curb close to an intersection.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus pulls over to the curb close to an intersection."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus pulls over to the curb close to an intersection."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus pulls over to the curb close to an intersection."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus pulls over to the curb close to an intersection."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus pulls over to the curb close to an intersection."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus pulls over to the curb close to an intersection."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus pulls over to the curb close to an intersection."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus pulls over to the curb close to an intersection."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A green bus is parked near a city curb.",
+            "coarse_prompt": "A bus is parked near a city curb.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus is parked near a city curb."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus is parked near a city curb."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus is parked near a city curb."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus is parked near a city curb."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus is parked near a city curb."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus is parked near a city curb."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus is parked near a city curb."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus pulls into a bus stop on the street.",
+            "coarse_prompt": "A bus pulls into a bus stop on the street.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus pulls into a bus stop on the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus pulls into a bus stop on the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus pulls into a bus stop on the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus pulls into a bus stop on the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus pulls into a bus stop on the street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus pulls into a bus stop on the street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus pulls into a bus stop on the street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus pulls into a bus stop on the street."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus sits at a curb on a snowy road.",
+            "coarse_prompt": "A bus sits at a curb on a road.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus sits at a curb on a road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus sits at a curb on a road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus sits at a curb on a road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus sits at a curb on a road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus sits at a curb on a road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus sits at a curb on a road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus sits at a curb on a road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus sits at a curb on a road."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A white and blue bus driving past houses on a city street.",
+            "coarse_prompt": "A bus driving past houses on a city street.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus driving past houses on a city street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "open-top",
+                    "dense_prompt": "An open-top bus driving past houses on a city street."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "a big bus parked by the side of a building",
+            "coarse_prompt": "a bus by the side of a building",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "a red bus by the side of a building"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "a blue bus by the side of a building"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "a white bus by the side of a building"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "a yellow bus by the side of a building"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "a green bus by the side of a building"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "a single-deckered bus by the side of a building"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "a double-decker bus by the side of a building"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "a school bus by the side of a building"
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A parked bus next to a building and palm trees.",
+            "coarse_prompt": "A bus next to a building and palm trees.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus next to a building and palm trees."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus next to a building and palm trees."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus next to a building and palm trees."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus next to a building and palm trees."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus next to a building and palm trees."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus next to a building and palm trees."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus next to a building and palm trees."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus next to a building and palm trees."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus driving down a quiet street in the city.",
+            "coarse_prompt": "A bus driving down a quiet street in the city.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus driving down a quiet street in the city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus driving down a quiet street in the city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus driving down a quiet street in the city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus driving down a quiet street in the city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus driving down a quiet street in the city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus driving down a quiet street in the city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus driving down a quiet street in the city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus driving down a quiet street in the city."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus that is very rusted and damaged.",
+            "coarse_prompt": "A bus",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "open-top",
+                    "dense_prompt": "An open-top bus"
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus on driving down a street with other buses",
+            "coarse_prompt": "A bus on driving down a street with other buses",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus on driving down a street with other buses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus on driving down a street with other buses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus on driving down a street with other buses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus on driving down a street with other buses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus on driving down a street with other buses"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus on driving down a street with other buses"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus on driving down a street with other buses"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus on driving down a street with other buses"
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A large yellow bus parked in some grass.",
+            "coarse_prompt": "A bus parked in some grass.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus parked in some grass."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus parked in some grass."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus parked in some grass."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus parked in some grass."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus parked in some grass."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus parked in some grass."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus parked in some grass."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A double high bus that is sitting in the street.",
+            "coarse_prompt": "A bus that is sitting in the street.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus that is sitting in the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus that is sitting in the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus that is sitting in the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus that is sitting in the street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus that is sitting in the street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus that is sitting in the street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus that is sitting in the street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus that is sitting in the street."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus drives down the street under a bridge.",
+            "coarse_prompt": "A bus drives down the street under a bridge.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus drives down the street under a bridge."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus drives down the street under a bridge."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus drives down the street under a bridge."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus drives down the street under a bridge."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus drives down the street under a bridge."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus drives down the street under a bridge."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus drives down the street under a bridge."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus drives down the street under a bridge."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A blue bus sitting in a parking lot",
+            "coarse_prompt": "A bus sitting in a parking lot",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus sitting in a parking lot"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus sitting in a parking lot"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus sitting in a parking lot"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus sitting in a parking lot"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus sitting in a parking lot"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus sitting in a parking lot"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus sitting in a parking lot"
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A white bus on a narrow street in the woods.",
+            "coarse_prompt": "A bus on a narrow street in the woods.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus on a narrow street in the woods."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus on a narrow street in the woods."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus on a narrow street in the woods."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus on a narrow street in the woods."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus on a narrow street in the woods."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus on a narrow street in the woods."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus on a narrow street in the woods."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus travels down a road in a city.",
+            "coarse_prompt": "A bus travels down a road in a city.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus travels down a road in a city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus travels down a road in a city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus travels down a road in a city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus travels down a road in a city."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus travels down a road in a city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus travels down a road in a city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus travels down a road in a city."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus travels down a road in a city."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus is going down a street by a stop light.",
+            "coarse_prompt": "A bus is going down a street by a stop light.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus is going down a street by a stop light."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "open-top",
+                    "dense_prompt": "An open-top bus is going down a street by a stop light."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "a yellow and white bus a red car a street and some houses",
+            "coarse_prompt": "a bus a car a street and some houses",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "a red bus a car a street and some houses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "a blue bus a car a street and some houses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "a white bus a car a street and some houses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "a yellow bus a car a street and some houses"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "a green bus a car a street and some houses"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "a single-deckered bus a car a street and some houses"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "a double-decker bus a car a street and some houses"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "a school bus a car a street and some houses"
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus is being primed for painting it.",
+            "coarse_prompt": "A bus is being primed for painting.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus is being primed for painting."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus is being primed for painting."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus is being primed for painting."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus is being primed for painting."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus is being primed for painting."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus is being primed for painting."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus is being primed for painting."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus is being primed for painting."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A big white bus is parked in the middle of a parking lot.",
+            "coarse_prompt": "A bus is parked in the middle of a parking lot.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus is parked in the middle of a parking lot."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus is parked in the middle of a parking lot."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus is parked in the middle of a parking lot."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus is parked in the middle of a parking lot."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus is parked in the middle of a parking lot."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus is parked in the middle of a parking lot."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus is parked in the middle of a parking lot."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "An old grey bus with bicycles on the front going down the road.",
+            "coarse_prompt": "A bus going down the road.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus going down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus going down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus going down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus going down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus going down the road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus going down the road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus going down the road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus going down the road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "open-top",
+                    "dense_prompt": "An open-top bus going down the road."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus is parked outside by a building and a traffic light.",
+            "coarse_prompt": "A bus is parked outside by a building and a traffic light.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus is parked outside by a building and a traffic light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus is parked outside by a building and a traffic light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus is parked outside by a building and a traffic light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus is parked outside by a building and a traffic light."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus is parked outside by a building and a traffic light."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus is parked outside by a building and a traffic light."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus is parked outside by a building and a traffic light."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus is parked outside by a building and a traffic light."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus sitting next to a truck in front of a church.",
+            "coarse_prompt": "A bus in front of a church.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus in front of a church."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus in front of a church."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus in front of a church."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus in front of a church."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus in front of a church."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus in front of a church."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus in front of a church."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus in front of a church."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A Double Decker bus at a bus stop in front of a building.",
+            "coarse_prompt": "A bus at a bus stop in front of a building.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus at a bus stop in front of a building."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "open-top",
+                    "dense_prompt": "An open-top bus at a bus stop in front of a building."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A blue bus driving down a street next to a forest.",
+            "coarse_prompt": "A bus driving down a street next to a forest.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus driving down a street next to a forest."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus driving down a street next to a forest."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus driving down a street next to a forest."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus driving down a street next to a forest."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus driving down a street next to a forest."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus driving down a street next to a forest."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus driving down a street next to a forest."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus driving down a street next to a forest."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus driving down a rural country road surrounded by mountains.",
+            "coarse_prompt": "A bus driving down a rural country road surrounded by mountains.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus driving down a rural country road surrounded by mountains."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus driving down a rural country road surrounded by mountains."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus driving down a rural country road surrounded by mountains."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus driving down a rural country road surrounded by mountains."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus driving down a rural country road surrounded by mountains."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus driving down a rural country road surrounded by mountains."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus driving down a rural country road surrounded by mountains."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus driving down a rural country road surrounded by mountains."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "a double deckered bus on a city street",
+            "coarse_prompt": "a bus on a city street",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "a red bus on a city street"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "a blue bus on a city street"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "a white bus on a city street"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "a yellow bus on a city street"
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "a green bus on a city street"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "a single-deckered bus on a city street"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "a double-decker bus on a city street"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "a school bus on a city street"
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "open-top",
+                    "dense_prompt": "an open-top bus on a city street"
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus behind a vehicle on a road stopped by a gate.",
+            "coarse_prompt": "A bus on a road stopped by a gate.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus on a road stopped by a gate."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus on a road stopped by a gate."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus on a road stopped by a gate."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus on a road stopped by a gate."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus on a road stopped by a gate."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus on a road stopped by a gate."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus on a road stopped by a gate."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus on a road stopped by a gate."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus that is driving down the road.",
+            "coarse_prompt": "A bus that is driving down the road.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus that is driving down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus that is driving down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus that is driving down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus that is driving down the road."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus that is driving down the road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus that is driving down the road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus that is driving down the road."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus that is driving down the road."
+                }
+            ]
+        },
+        {
+            "coco_seed_caption": "A bus is traveling down a city street that does not have much traffic.",
+            "coarse_prompt": "A bus is traveling down a city street.",
+            "dense_prompts": [
+                {
+                    "attribute_type": "color",
+                    "attribute": "red",
+                    "dense_prompt": "A red bus is traveling down a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "blue",
+                    "dense_prompt": "A blue bus is traveling down a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "white",
+                    "dense_prompt": "A white bus is traveling down a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "yellow",
+                    "dense_prompt": "A yellow bus is traveling down a city street."
+                },
+                {
+                    "attribute_type": "color",
+                    "attribute": "green",
+                    "dense_prompt": "A green bus is traveling down a city street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "single-deckered",
+                    "dense_prompt": "A single-deckered bus is traveling down a city street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "double-decker",
+                    "dense_prompt": "A double-decker bus is traveling down a city street."
+                },
+                {
+                    "attribute_type": "body_type",
+                    "attribute": "school bus",
+                    "dense_prompt": "A school bus is traveling down a city street."
+                }
+            ]
+        }
+    ]
+}

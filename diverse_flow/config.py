@@ -13,10 +13,11 @@ class DiversityConfig:
     eps_logdet: float = 1e-3 # numerical stability
     feature_center: bool = True # center features (translation invariance)
     feature_l2norm: bool = True # L2 normalize features (angle-focused)
-    whiten: bool = False # optional feature whitening
+    whiten: bool = True # optional feature whitening
+    whiten_min_B: int = 16
     gamma0: float = 0.15 # base diversity strength
     gamma_max_ratio: float = 0.3 # trust region cap: ||γ g|| ≤ ratio * ||v||
-    partial_ortho: float = 0.8 # partial orthogonal coefficient λ∈[0,1]
+    partial_ortho: float = 0.5 # partial orthogonal coefficient λ∈[0,1]
     t_gate: Tuple[float,float] = (0.2, 0.9) # only apply diversity in this t range
     sched_shape: str = "sin2" # 'sin2' or 't1mt'
     update_every: int = 1 # recompute K/grad every m steps

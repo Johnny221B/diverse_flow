@@ -350,6 +350,8 @@ def _nan_to_none(obj):
         return [_nan_to_none(v) for v in obj]
     return obj
 
+# python eval_imgs.py --gen /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_An_airplane_wing_pointed_toward_the_ground --real /mnt/data6t/yyz/flow_grpo/flow_base/BeyondFID/datasets/ADE20K/test --out /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_An_airplane_wing_pointed_toward_the_ground
+
 # -------------------------------
 # Main
 # -------------------------------

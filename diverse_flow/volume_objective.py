@@ -25,14 +25,13 @@ class VolumeObjective:
         if self.cfg.feature_center:
             phi = phi - phi.mean(dim=0, keepdim=True)
 
-        # —— 白化搬到 CPU，避免在 GPU 侧申请巨大工作区 ——
-        if getattr(self.cfg, "whiten", False) and phi.size(0) >= 3:
+        if getattr(self.cfg, "whiten", False) and (phi.size(0) >= getattr(self.cfg, "whiten_min_B", 16)):
             B, D = phi.shape
             phi_cpu = phi.detach().float().to("cpu")  # [B,D] on CPU
             cov = (phi_cpu.t() @ phi_cpu) / max(B - 1, 1)  # [D,D]
             cov = cov + self.cfg.eps_logdet * torch.eye(D, device=cov.device, dtype=cov.dtype)
             evals, evecs = torch.linalg.eigh(cov)  # on CPU
-            inv_sqrt = (evecs * evals.clamp_min(1e-6).rsqrt()).mm(evecs.t())
+            inv_sqrt = (evecs * evals.clamp_min(1e-5).rsqrt()).mm(evecs.t())
             phi = (phi_cpu @ inv_sqrt).to(phi.device, dtype=phi.dtype)  # back to original device/dtype
 
         return phi
@@ -44,9 +43,12 @@ class VolumeObjective:
     def _logdetI_tauK(self, K: torch.Tensor) -> torch.Tensor:
         B = K.size(0)
         I = torch.eye(B, device=K.device, dtype=K.dtype)
-        M = I + self.cfg.tau * K + self.cfg.eps_logdet * I
+        # A：trace-scaled ε
+        eps_eff = self.cfg.eps_logdet * (torch.trace(K) / max(B, 1))
+        M = I + self.cfg.tau * K + eps_eff * I
         sign, logabsdet = torch.linalg.slogdet(M)
         return (sign.clamp_min(0.0) * logabsdet)
+
 
     def _leverage_weights(self, K: torch.Tensor) -> torch.Tensor:
         if self.cfg.leverage_alpha <= 0:
@@ -108,19 +110,19 @@ class VolumeObjective:
             x_chunk = (
                 x_in[s:s+chunk]
                 .detach()
-                .to(dev, dtype=torch.float16 if use_amp else torch.float32)
+                .to(dev, dtype=torch.float32)  # 强制 float32
                 .clone()
                 .requires_grad_(True)
             )
-            with torch.enable_grad(), torch.amp.autocast("cuda", enabled=use_amp):
-                phi_chunk = self._features(x_chunk)  # [bs,D]
-                # grad_outputs 的 dtype 必须与 phi_chunk 匹配
-                go = grad_phi[s:s+chunk].to(phi_chunk.dtype)
+            with torch.enable_grad():         # 不用 autocast，保证数值稳定  torch.amp.autocast("cuda", enabled=use_amp)
+                phi_chunk = self._features(x_chunk)         # [bs,D]，内部已是 float32
+                go = grad_phi[s:s+chunk].to(phi_chunk.dtype)  # 也是 float32
                 g_chunk = torch.autograd.grad(
                     phi_chunk, x_chunk, grad_outputs=go,
                     retain_graph=False, create_graph=False
                 )[0]  # [bs,3,H,W]
             grads.append(g_chunk)
+
 
             # —— 用完这块就清 —— #
             del x_chunk, phi_chunk, g_chunk, go
@@ -131,7 +133,6 @@ class VolumeObjective:
 
         grad_x = torch.cat(grads, dim=0)
 
-        # ===== 日志（非必须） =====
         with torch.no_grad():
             from .utils import pairwise_cosine_angles
             angles = pairwise_cosine_angles(F.normalize(phi_all, dim=-1))

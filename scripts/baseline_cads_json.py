@@ -3,9 +3,14 @@
 Grid evaluation for CADS on SD-3.5 (Flow-Matching).
 
 - Inputs:
-  * New JSON format: { "dog": [...], "truck": [...], ... } (top-level keys are concepts)
-    or a single --prompt string (back-compat).
-  * Multiple guidance scales (--guidances) and multiple seeds (--seeds).
+  * A JSON file with multiple concepts:
+      {
+        "dog": ["a photo of a dog", "a dog", ...],
+        "truck": ["a photo of a truck", "a truck", ...],
+        ...
+      }
+    (top-level keys are concepts; values are lists of prompts)
+  * Or a single --prompt string (back-compat).
 
 - Outputs:
   outputs/{method}_{concept}/
@@ -17,7 +22,7 @@ Grid evaluation for CADS on SD-3.5 (Flow-Matching).
 Example:
   python -u scripts/cads_eval_grid.py \
     --model "./models/stable-diffusion-3.5-medium" \
-    --spec ./specs/mscoco_subset.json \
+    --spec ./specs/prompt.json \
     --negative "" \
     --G 16 --steps 10 \
     --guidances 3.0 7.5 12.0 \
@@ -70,17 +75,17 @@ def slugify(text: str, maxlen: int = 120) -> str:
     s = re.sub(r"_{2,}", "_", s).strip("._-")
     return s[:maxlen] if maxlen and len(s) > maxlen else s
 
-def _parse_concepts_spec(spec: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
+def _parse_concepts_spec(spec_obj: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
     """
-    Strictly parse the new spec format:
-      { "dog": ["a dog", "a photo of a dog", ...], "truck": [...], ... }
-    Returns: OrderedDict{concept -> [prompts...]} in file order, each list de-duped (stable).
+    Strictly parse the multi-concept JSON:
+      { "dog": ["a dog", ...], "truck": ["a truck", ...], ... }
+    Returns an OrderedDict in file order; each prompt list is de-duped (stable).
     """
-    if not isinstance(spec, dict):
-        raise ValueError("[CADS] Spec must be a JSON object: {concept: [prompts...]}")
+    if not isinstance(spec_obj, dict):
+        raise ValueError("[CADS] Spec must be a JSON object mapping concept -> list[str].")
 
     concept_to_prompts: "OrderedDict[str, List[str]]" = OrderedDict()
-    for concept, plist in spec.items():
+    for concept, plist in spec_obj.items():
         if not isinstance(concept, str) or not isinstance(plist, (list, tuple)):
             continue
         seen, cleaned = set(), []
@@ -88,7 +93,8 @@ def _parse_concepts_spec(spec: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
             if isinstance(p, str):
                 s = p.strip()
                 if s and s not in seen:
-                    seen.add(s); cleaned.append(s)
+                    seen.add(s)
+                    cleaned.append(s)
         if cleaned:
             concept_to_prompts[concept] = cleaned
 
@@ -133,7 +139,33 @@ def _move_if_exists(mod, device: str | None):
         mod.to(torch.device(device))
 
 def _generators_for_K(exec_device: str, base_seed: int, K: int) -> List[torch.Generator]:
-    return [torch.Generator(device=exec_device).manual_seed(int(base_seed) + i) for i in range(K)]
+    return [torch.Generator(device=torch.device(exec_device)).manual_seed(int(base_seed) + i) for i in range(K)]
+
+# ---- Device-mismatch fix (ensure VAE decode gets latents on the same device/dtype) ----
+def _final_latents_to_vae(ppl, latents: torch.Tensor) -> torch.Tensor:
+    vae = getattr(ppl, "vae", None)
+    if vae is None or latents is None:
+        return latents
+    try:
+        vae_dtype = next(vae.parameters()).dtype
+    except StopIteration:
+        vae_dtype = latents.dtype
+    return latents.to(device=vae.device, dtype=vae_dtype, non_blocking=True)
+
+def _wrap_cads_callback(cads_obj, total_steps: int):
+    """
+    Wrap CADS __call__ so that at the *last* step we move latents to VAE's device/dtype.
+    Matches diffusers' callback_on_step_end: (pipeline, step_index, timestep, kwargs) -> dict(kwargs)
+    """
+    total_steps = int(total_steps)
+    def _cb(ppl, i, t, kw: Dict[str, Any]):
+        out = cads_obj(ppl, i, t, kw)
+        if not isinstance(out, dict):
+            out = kw
+        if (i + 1) == total_steps and out.get("latents", None) is not None:
+            out["latents"] = _final_latents_to_vae(ppl, out["latents"])
+        return out
+    return _cb
 
 
 # ---------------------------
@@ -198,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--method", type=str, default="cads", help="outputs/{method}_{concept}")
     p.add_argument("--out", type=str, default="outputs", help="(unused for structure; kept for compatibility)")
 
-    # Prompts (new spec or single prompt)
+    # Prompts (multi-concept spec or single prompt)
     p.add_argument("--spec", type=str, default=None,
                    help="Path to JSON: {concept: [prompts...]} (overrides --prompt)")
     p.add_argument("--prompt", type=str, default=None, help="Fallback if --spec not provided")
@@ -248,11 +280,11 @@ def main():
     args = build_parser().parse_args()
     torch_dtype = _select_dtype(args.dtype)
 
-    # Parse prompts source
+    # Parse prompts source (preserve file order)
     if args.spec:
         with open(args.spec, "r", encoding="utf-8") as fp:
-            spec = json.load(fp)
-        concept_to_prompts = _parse_concepts_spec(spec)  # OrderedDict
+            spec = json.load(fp, object_pairs_hook=OrderedDict)
+        concept_to_prompts = _parse_concepts_spec(spec)  # OrderedDict[str, List[str]]
     elif args.prompt:
         concept_to_prompts = OrderedDict([("single", [args.prompt])])
     else:
@@ -328,6 +360,7 @@ def main():
                     )
 
                     gens = _generators_for_K(exec_dev, int(sd), int(args.G))
+                    cb = _wrap_cads_callback(cads, int(args.steps))
 
                     run_dir = _prompt_run_dir(
                         imgs_root=imgs_root,
@@ -346,7 +379,7 @@ def main():
                             num_inference_steps=int(args.steps),
                             guidance_scale=float(g),
                             generator=gens,
-                            callback_on_step_end=cads,
+                            callback_on_step_end=cb,
                             callback_on_step_end_tensor_inputs=["latents"],
                             output_type="pil",
                         )
@@ -358,7 +391,7 @@ def main():
                             num_inference_steps=int(args.steps),
                             guidance_scale=float(g),
                             generator=gens,
-                            callback_on_step_end=cads,
+                            callback_on_step_end=cb,
                             callback_on_step_end_tensor_inputs=["latents"],
                             output_type="pil",
                         )

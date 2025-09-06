@@ -1,2 +1,4 @@
 label,auc_prd_mu,rec_at_p0.60_mu,rec_at_p0.70_mu,rec_at_p0.76_mu,source
-dpp,0.0698632063388889,0.0600913799375788,0.0567124396376085,0.0549551030917732,/mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_truck/eval/exp1_7.5_truck.csv
+dpp,0.0636330777561679,0.0633805640817433,0.0633171176700982,0.0632872512757542,/mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_truck/eval/exp1_7.5_truck.csv
+pg,0.0767579984362217,0.0680384380572609,0.0670427054136617,0.0665936378362642,/mnt/data6t/yyz/flow_grpo/flow_base/outputs/pg_truck/eval/exp1_7.5_truck.csv
+cads,0.0755366813620579,0.0676240813501364,0.0668833989905273,0.0665456765494322,/mnt/data6t/yyz/flow_grpo/flow_base/outputs/cads_truck/eval/exp1_7.5_truck.csv

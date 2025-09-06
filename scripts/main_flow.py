@@ -90,7 +90,7 @@ def parse_args():
     # 多样性目标
     ap.add_argument('--gamma0', type=float, default=0.12)
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)
-    ap.add_argument('--partial-ortho', type=float, default=0.8)
+    ap.add_argument('--partial-ortho', type=float, default=0.5)
     ap.add_argument('--t-gate', type=str, default='0.25,0.9')
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
@@ -217,7 +217,14 @@ def main():
         _log("Volume objective ready.", args.debug)
 
         # ===== 3) 回调：VAE 解码 -> CLIP 体积损失 -> VJP -> 写回 =====
-        state = {"prev_latents_vae": None}
+        state = {
+            "prev_latents_vae_cpu": None,
+            "prev_ctrl_vae_cpu":   None,
+            "prev_dt_unit":        None,
+            "prev_prev_latents_vae_cpu": None,  # E3: 再多存一帧做二阶差分
+            "last_logdet":         None,        # E2: 能量单调守门
+            "gamma_auto_done":     False,       # E1: 是否完成首步自校准
+        }
 
         def _vae_decode_pixels(z):
             sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
@@ -234,14 +241,22 @@ def main():
             t_norm = (t_cur - t_min) / (t_max - t_min + 1e-8)
             # 单位化步长（与上面的规范化同尺度）
             dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
-
-            gamma_sched = cfg.gamma0 * sched_factor(t_norm, cfg.t_gate, cfg.sched_shape)
-            if gamma_sched <= 0: 
-                return kw
-
+            
             lat = kw.get("latents")
             if lat is None:
                 return kw
+
+            gamma_sched = cfg.gamma0 * sched_factor(t_norm, cfg.t_gate, cfg.sched_shape)
+            if gamma_sched <= 0:
+                state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
+                state["prev_latents_vae_cpu"] = lat.detach().to("cpu")
+                state["prev_dt_unit"] = dt_unit
+                return kw
+
+
+            # lat = kw.get("latents")
+            # if lat is None:
+            #     return kw
             lat_new = lat.clone()
 
             # 把本步 latent 搬到 VAE 卡（作为 leaf 的来源），分块降低峰值显存
@@ -268,6 +283,15 @@ def main():
                 # —— CLIP 卡上求体积损失对“像素”的梯度 —— 
                 imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
                 _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
+                current_logdet = float(_logs.get("logdet", 0.0))
+
+                # E2: 能量单调守门（和上一帧比，若下降则削弱 gamma）
+                last_logdet = state.get("last_logdet", None)
+                if (last_logdet is not None) and (current_logdet < last_logdet):
+                    gamma_sched = 0.5 * gamma_sched  # 可取 0.5~0.7
+
+                # 记录本步能量，供下一步比较
+                state["last_logdet"] = current_logdet
                 grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
 
                 # —— VJP 穿回 VAE：得到对 latent 的梯度（把它视为控制“速度” u）——
@@ -279,17 +303,57 @@ def main():
                 # —— 基流速度估计：v_est = Δz / Δt —— 
                 v_est = None
                 if prev_cpu is not None:
-                    v_est = (z - prev_cpu[s:e].to(dev_vae, non_blocking=True)) / max(dt_unit, 1e-8)
+                    total_diff = z - prev_cpu[s:e].to(dev_vae, non_blocking=True)   # 本步总位移
+                    prev_ctrl = state.get("prev_ctrl_vae_cpu", None)
+                    prev_dt   = state.get("prev_dt_unit", None)
+
+                    if (prev_ctrl is not None) and (prev_dt is not None):
+                        # 对应本 chunk 的上一轮控制位移（位移已包含 dt，直接相减）
+                        ctrl_prev = prev_ctrl[s:e].to(dev_vae, non_blocking=True)
+                        base_move_prev = total_diff - ctrl_prev                    # 纯基流位移
+                        v_est = base_move_prev / max(prev_dt, 1e-8)                # 纯基流速度
+                    else:
+                        # 第一轮或无缓存时，回退为原有估计
+                        v_est = total_diff / max(dt_unit, 1e-8)
 
                 # —— 质量保护：部分正交到基流速度 + 信赖域（位移尺度）——
                 from diverse_flow.utils import project_partial_orth, batched_norm
                 g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
-                u = g_proj  # 把投影后的方向当作“控制速度”
+                u = g_proj  # 控制方向
 
-                # 基础位移量级（base displacement）：|Δz_base| ≈ |v_est * Δt|
+                # ==== E1: 首个触发步的自校准（把位移比拉到 0.1~0.3） ====
+                if not state.get("gamma_auto_done", False):
+                    v_norm = batched_norm(v_est) if v_est is not None else batched_norm(z)
+                    g_norm = batched_norm(u)
+                    ratio = (g_norm / (v_norm + 1e-12))  # [B,1]
+                    med = torch.median(ratio).item() if ratio.numel() > 0 else 1.0
+                    if med > 0:
+                        target = 0.2  # 目标位移比（0.1~0.3 皆可）
+                        gamma_sched = min(gamma_sched, target / med)
+                    state["gamma_auto_done"] = True
+
+                # ==== E3: 曲率守门（二阶差分大就收油） ====
+                kappa_scale = 1.0
+                pp = state.get("prev_prev_latents_vae_cpu", None)
+                p  = state.get("prev_latents_vae_cpu", None)
+                if (pp is not None) and (p is not None):
+                    pp = pp[s:e].to(dev_vae, non_blocking=True)
+                    p  = p [s:e].to(dev_vae, non_blocking=True)
+                    # 离散二阶差分：z - 2p + pp
+                    num = (z - 2.0*p + pp).flatten(1).norm(dim=1, keepdim=True)
+                    den = (p - pp).flatten(1).norm(dim=1, keepdim=True) + 1e-8
+                    kappa = (num / den)  # [bs,1]
+                    # 简单抑制：>0.5 时按 1/(1+kappa) 缩放
+                    kappa_scale = torch.clamp(1.0 / (1.0 + kappa), min=0.25, max=1.0)  # 0.25~1.0
+                    # 取 batch 中位数来缩放 gamma（也可以逐样本，但更复杂）
+                    kappa_scale = torch.median(kappa).item()
+                    if kappa_scale < 1.0:
+                        gamma_sched = gamma_sched * kappa_scale
+
+                # ==== 信赖域限幅（与你原来一致） ====
                 base_disp = (v_est * dt_unit) if v_est is not None else z
-                disp_cap  = cfg.gamma_max_ratio * batched_norm(base_disp)     # 上限（位移尺度）
-                raw_disp  = batched_norm(u) * dt_unit                          # 控制将带来的位移尺度
+                disp_cap  = cfg.gamma_max_ratio * batched_norm(base_disp)
+                raw_disp  = batched_norm(u) * dt_unit
                 scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (raw_disp + 1e-12))
 
                 delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * (u * dt_unit)
@@ -297,13 +361,32 @@ def main():
                 delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
                 lat_new[s:e] = lat_new[s:e] + delta_tr
 
+                # —— 缓存本 chunk 的控制位移（CPU 上存上一轮用）——
+                if "ctrl_cache" not in state:
+                    state["ctrl_cache"] = []
+                state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
+
                 if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
                 if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
                 del imgs_chunk, imgs_clip, grad_img_clip, grad_img_vae, grad_lat, g_proj, u, base_disp, disp_cap, raw_disp, scale, delta_chunk, delta_tr, v_est, z
 
             kw["latents"] = lat_new
+
+            # 先把上一帧挪到 prev_prev，再更新 prev
+            state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
             state["prev_latents_vae_cpu"] = lat_vae_full.detach().to("cpu")
+
+            # （B）控制位移与 dt
+            if "ctrl_cache" in state:
+                state["prev_ctrl_vae_cpu"] = torch.cat(state["ctrl_cache"], dim=0).to("cpu")
+                del state["ctrl_cache"]
+            state["prev_dt_unit"] = dt_unit
+
             return kw
+
+            # kw["latents"] = lat_new
+            # state["prev_latents_vae_cpu"] = lat_vae_full.detach().to("cpu")
+            # return kw
         
         import re
 

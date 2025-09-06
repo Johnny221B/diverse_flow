@@ -2,28 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-Experiment 1 (PRD & AUC-PRD) evaluator.
+Experiment 1 (PRD & AUC-PRD) evaluator (no prompts_json filtering).
 
 K-set folder name (fixed):
   <prompt>_seed<seed>_g<guidance>_s<steps>
 e.g.:
   a_photo_of_one_truck_seed3333_g3.0_s30
 
-Rules
------
-- prompts.json 是「concept -> [prompts...]」的大表。
-- 只使用 --concept 对应键下的 prompts（空格会转下划线），精确匹配 <prompt>。
-- 每个 guidance 存一份 CSV：exp1_<guidance>_<concept>.csv
-- 支持多方法：--methods "m1,m2,m3"
-
-Auto paths
-----------
-若未提供 --real_dir / --imgs_root / --prompts_json / --out_dir，
-则按以下规则推断：
-  real_dir     = {dataset_root}/{concept} 或 {dataset_root}/{concept_underscore}
-  imgs_root    = {outputs_root}/{method}_{concept}/imgs
-  prompts_json = 需要显式传入（建议放公共位置），或你也可以把每方法自带的 json 传进来
-  out_dir      = {outputs_root}/{method}_{concept}/eval
+Changes in this version
+-----------------------
+- CHANGED: No longer loads/uses prompts_json to select prompts.
+- CHANGED: Scans ALL K-sets under imgs_root that match the regex.
+- Everything else remains the same (CLIP features, PRD/AUC-PRD, recall@precision,
+  per-guidance aggregation, CSV outputs under {outputs_root}/{method}_{concept}/eval).
 """
 
 import argparse, json, re, gc, sys
@@ -57,56 +48,17 @@ def norm_prompt(s: str) -> str:
     s = re.sub(r"_+", "_", s)
     return s
 
-def concept_aliases(concept: str) -> List[str]:
-    """返回 concept 的几种写法，用于找 JSON 和 real_dir：带空格、下划线、以及常见别名（如 sofa/couch）"""
-    variants = {concept, concept.replace("_", " "), concept.replace(" ", "_")}
-    # 常见别名兜底（按你的8类设定）
-    alias = {
-        "sofa": "couch",
-        "couch": "sofa",
-        "dining_table": "dining table",
-        "dining table": "dining_table",
-        "potted_plant": "potted plant",
-        "potted plant": "potted_plant",
-    }
-    if concept in alias:
-        variants.add(alias[concept])
-    return list(variants)
-
-def load_prompts_for_concept(prompts_json: Path, concept: str) -> List[str]:
-    """从大 JSON（concept -> [prompts]）里取当前 concept 的 prompts；空格->下划线；去重保序。"""
-    obj = json.load(open(prompts_json, "r"))
-    if not isinstance(obj, dict):
-        raise ValueError(f"prompts_json 应该是字典（concept->list），收到的是 {type(obj)}")
-
-    prompts_raw = None
-    for key in concept_aliases(concept):
-        if key in obj:
-            prompts_raw = obj[key]
-            break
-    if prompts_raw is None:
-        raise KeyError(f"在 {prompts_json} 中找不到 concept='{concept}' 的 prompts。可用键有：{list(obj.keys())[:10]} ...")
-
-    if not isinstance(prompts_raw, list) or not prompts_raw:
-        raise ValueError(f"concept='{concept}' 的 prompts 不是非空列表：{type(prompts_raw)}")
-
-    prompts = [norm_prompt(str(x)) for x in prompts_raw]
-    # 去重保序
-    uniq, seen = [], set()
-    for p in prompts:
-        if p not in seen:
-            uniq.append(p); seen.add(p)
-    return uniq
-
 # --------- K-set: <prompt>_seed<seed>_g<guidance>_s<steps> ---------
 KSET_RE = re.compile(
     r"^(?P<prompt>.+)_seed(?P<seed>\d+)_g(?P<guidance>[-+]?\d*\.?\d+)_s(?P<steps>\d+)$"
 )
 
-def scan_ksets_exact(imgs_root: Path, allowed_prompts: List[str], print_found: bool=False) -> List[Dict]:
-    allowed = set(allowed_prompts)  # normalized
+# CHANGED: scan all K-sets under imgs_root (no allowed_prompts filtering)
+def scan_ksets_all(imgs_root: Path, print_found: bool=False) -> List[Dict]:
     found_prompts = []
     out = []
+    if not imgs_root.exists():
+        return out
     for d in sorted(imgs_root.iterdir()):
         if not d.is_dir():
             continue
@@ -115,8 +67,6 @@ def scan_ksets_exact(imgs_root: Path, allowed_prompts: List[str], print_found: b
             continue
         prompt = m.group("prompt")
         found_prompts.append(prompt)
-        if prompt not in allowed:
-            continue
         imgs = list_images(d)
         if not imgs:
             continue
@@ -170,7 +120,7 @@ class CLIPFeaturizer:
             f = F.normalize(f.float(), dim=-1)
             feats.append(f.cpu().numpy())
         free_mem()
-        return np.concatenate(feats, axis=0)
+        return np.concatenate(feats, axis=0) if feats else np.zeros((0, 512), dtype=np.float32)
 
 # --------- PRD (Sajjadi) ---------
 def prd_from_hist(p: np.ndarray, q: np.ndarray, lambdas: np.ndarray):
@@ -184,6 +134,10 @@ def prd_from_hist(p: np.ndarray, q: np.ndarray, lambdas: np.ndarray):
 
 def compute_prd_curve(real_feats: np.ndarray, gen_feats: np.ndarray,
                       n_bins: int = 10, n_lambdas: int = 151, random_state: int = 0):
+    if real_feats.size == 0 or gen_feats.size == 0:
+        # Edge case: empty feats -> degenerate PRD
+        lambdas = np.exp(np.linspace(np.log(1e-3), np.log(1e3), n_lambdas))
+        return np.zeros_like(lambdas), np.zeros_like(lambdas)
     X = np.concatenate([real_feats, gen_feats], axis=0)
     km = KMeans(n_clusters=n_bins, random_state=random_state, n_init=10)
     labels = km.fit_predict(X)
@@ -200,9 +154,11 @@ def auc_prd(P: np.ndarray, R: np.ndarray) -> float:
     x = R[order]; y = P[order]
     mask = np.concatenate([[True], np.diff(x) > 1e-9])
     x = x[mask]; y = y[mask]
-    return float(np.trapz(y, x))
+    return float(np.trapz(y, x)) if x.size and y.size else 0.0
 
 def recall_at_precision(P: np.ndarray, R: np.ndarray, targets=(0.60,0.70,0.76)) -> Dict[float,float]:
+    if P.size == 0 or R.size == 0:
+        return {float(t): 0.0 for t in targets}
     order = np.argsort(P)
     x = P[order]; y = R[order]
     out = {}
@@ -220,7 +176,6 @@ def run_for_method(
     concept: str,
     real_dir: Path,
     imgs_root: Path,
-    prompts_json: Path,
     method: str,
     steps: int,
     batch_size: int,
@@ -234,19 +189,17 @@ def run_for_method(
 ):
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    prompts = load_prompts_for_concept(prompts_json, concept)
-    assert prompts, f"Empty prompts for concept='{concept}' in {prompts_json}"
-    print(f"[INFO] concept='{concept}' prompts (normalized): {prompts}")
-
+    # CHANGED: no prompts loading; we just scan all K-sets
     clipper = CLIPFeaturizer(model_name=clip_model_name, device=device, batch_size=batch_size,
                              download_root=clip_download_root, jit=clip_jit)
+
     real_imgs = list_images(real_dir)
     assert real_imgs, f"No real images in {real_dir}"
     real_feats = clipper.encode_paths(real_imgs)
 
-    ksets = scan_ksets_exact(imgs_root, prompts, print_found=print_found)
+    ksets = scan_ksets_all(imgs_root, print_found=print_found)  # CHANGED
     if not ksets:
-        print(f"[WARN] No matched K-sets under {imgs_root} (exact prompt match).")
+        print(f"[WARN] No K-sets under {imgs_root} (regex match failed or empty).")
         return
 
     by_g_p: Dict[float, Dict[str, List[Tuple[np.ndarray,np.ndarray,float,Dict[float,float]]]]] = defaultdict(lambda: defaultdict(list))
@@ -316,12 +269,11 @@ def resolve_real_dir(dataset_root: Path, concept: str) -> Path:
     for p in cands:
         if list_images(p):
             return p
-    # 允许没有图片时也返回首选路径（由上游报错更明确）
     return cands[0]
 
 def autodetect_paths(outputs_root: Path, dataset_root: Path, method: str, concept: str):
     imgs_root    = outputs_root / f"{method}_{concept}" / "imgs"
-    out_dir      = outputs_root / f"{method}_{concept}" / "eval"  # << 你要求的写法
+    out_dir      = outputs_root / f"{method}_{concept}" / "eval"
     real_dir     = resolve_real_dir(dataset_root, concept)
     return real_dir, imgs_root, out_dir
 
@@ -331,13 +283,12 @@ def main():
     ap.add_argument("--concept", type=str, required=True, help="e.g., truck")
     ap.add_argument("--methods", type=str, required=True, help="comma-separated, e.g., 'dpp,baseline1,baseline2'")
 
-    # 显式路径（若不给，则用根目录自动推断）
     ap.add_argument("--real_dir", type=Path, default=None)
     ap.add_argument("--imgs_root", type=Path, default=None)
-    ap.add_argument("--prompts_json", type=Path, required=True, help="大表：{concept: [prompts,...], ...}")
+    
+    ap.add_argument("--prompts_json", type=Path, default=None, help="(ignored in this version)")
     ap.add_argument("--out_dir", type=Path, default=None)
 
-    # 根目录，用于自动推断
     ap.add_argument("--outputs_root", type=Path, default=None, help="Base outputs root")
     ap.add_argument("--dataset_root", type=Path, default=None, help="Base dataset root")
 
@@ -358,6 +309,9 @@ def main():
 
     clip_root = str(Path(args.clip_download_root).expanduser()) if args.clip_download_root else None
 
+    if args.prompts_json is not None:
+        print("[INFO] --prompts_json is provided but ignored in this version.")
+
     for method in methods:
         # 逐方法确定路径
         if args.real_dir and args.imgs_root and args.out_dir:
@@ -374,14 +328,12 @@ def main():
         print(f"\n[RUN] concept={args.concept} | method={method}\n"
               f"      real_dir     = {real_dir}\n"
               f"      imgs_root    = {imgs_root}\n"
-              f"      prompts_json = {args.prompts_json}\n"
               f"      out_dir      = {out_dir}\n")
 
         run_for_method(
             concept=args.concept,
             real_dir=real_dir,
             imgs_root=imgs_root,
-            prompts_json=args.prompts_json,
             method=method,
             steps=args.steps,
             batch_size=args.batch_size,

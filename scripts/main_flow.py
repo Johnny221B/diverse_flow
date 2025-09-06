@@ -317,46 +317,79 @@ def main():
                         v_est = total_diff / max(dt_unit, 1e-8)
 
                 # —— 质量保护：部分正交到基流速度 + 信赖域（位移尺度）——
-                from diverse_flow.utils import project_partial_orth, batched_norm
+                # from diverse_flow.utils import project_partial_orth, batched_norm
+                # g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
+                # u = g_proj  # 控制方向
+
+                # # ==== E1: 首个触发步的自校准（把位移比拉到 0.1~0.3） ====
+                # if not state.get("gamma_auto_done", False):
+                #     v_norm = batched_norm(v_est) if v_est is not None else batched_norm(z)
+                #     g_norm = batched_norm(u)
+                #     ratio = (g_norm / (v_norm + 1e-12))  # [B,1]
+                #     med = torch.median(ratio).item() if ratio.numel() > 0 else 1.0
+                #     if med > 0:
+                #         target = 0.2  # 目标位移比（0.1~0.3 皆可）
+                #         gamma_sched = min(gamma_sched, target / med)
+                #     state["gamma_auto_done"] = True
+
+                # # ==== E3: 曲率守门（二阶差分大就收油） ====
+                # kappa_scale = 1.0
+                # pp = state.get("prev_prev_latents_vae_cpu", None)
+                # p  = state.get("prev_latents_vae_cpu", None)
+                # if (pp is not None) and (p is not None):
+                #     pp = pp[s:e].to(dev_vae, non_blocking=True)
+                #     p  = p [s:e].to(dev_vae, non_blocking=True)
+                #     # 离散二阶差分：z - 2p + pp
+                #     num = (z - 2.0*p + pp).flatten(1).norm(dim=1, keepdim=True)
+                #     den = (p - pp).flatten(1).norm(dim=1, keepdim=True) + 1e-8
+                #     kappa = (num / den)  # [bs,1]
+                #     # 简单抑制：>0.5 时按 1/(1+kappa) 缩放
+                #     kappa_scale = torch.clamp(1.0 / (1.0 + kappa), min=0.25, max=1.0)  # 0.25~1.0
+                #     # 取 batch 中位数来缩放 gamma（也可以逐样本，但更复杂）
+                #     kappa_scale = torch.median(kappa).item()
+                #     if kappa_scale < 1.0:
+                #         gamma_sched = gamma_sched * kappa_scale
+
+                # # ==== 信赖域限幅（与你原来一致） ====
+                # base_disp = (v_est * dt_unit) if v_est is not None else z
+                # disp_cap  = cfg.gamma_max_ratio * batched_norm(base_disp)
+                # raw_disp  = batched_norm(u) * dt_unit
+                # scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (raw_disp + 1e-12))
+
+                # delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * (u * dt_unit)
+                from diverse_flow.utils import project_partial_orth, batched_norm, sched_factor
+
+                # 体积力（先与基流部分正交）
                 g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
-                u = g_proj  # 控制方向
-
-                # ==== E1: 首个触发步的自校准（把位移比拉到 0.1~0.3） ====
-                if not state.get("gamma_auto_done", False):
-                    v_norm = batched_norm(v_est) if v_est is not None else batched_norm(z)
-                    g_norm = batched_norm(u)
-                    ratio = (g_norm / (v_norm + 1e-12))  # [B,1]
-                    med = torch.median(ratio).item() if ratio.numel() > 0 else 1.0
-                    if med > 0:
-                        target = 0.2  # 目标位移比（0.1~0.3 皆可）
-                        gamma_sched = min(gamma_sched, target / med)
-                    state["gamma_auto_done"] = True
-
-                # ==== E3: 曲率守门（二阶差分大就收油） ====
-                kappa_scale = 1.0
-                pp = state.get("prev_prev_latents_vae_cpu", None)
-                p  = state.get("prev_latents_vae_cpu", None)
-                if (pp is not None) and (p is not None):
-                    pp = pp[s:e].to(dev_vae, non_blocking=True)
-                    p  = p [s:e].to(dev_vae, non_blocking=True)
-                    # 离散二阶差分：z - 2p + pp
-                    num = (z - 2.0*p + pp).flatten(1).norm(dim=1, keepdim=True)
-                    den = (p - pp).flatten(1).norm(dim=1, keepdim=True) + 1e-8
-                    kappa = (num / den)  # [bs,1]
-                    # 简单抑制：>0.5 时按 1/(1+kappa) 缩放
-                    kappa_scale = torch.clamp(1.0 / (1.0 + kappa), min=0.25, max=1.0)  # 0.25~1.0
-                    # 取 batch 中位数来缩放 gamma（也可以逐样本，但更复杂）
-                    kappa_scale = torch.median(kappa).item()
-                    if kappa_scale < 1.0:
-                        gamma_sched = gamma_sched * kappa_scale
-
-                # ==== 信赖域限幅（与你原来一致） ====
+                
+                # --- NEW: 早强-晚弱的定向噪声（位移形态；与基流全正交） ---
+                beta_gate = sched_factor(
+                    t_norm,
+                    cfg.t_gate if getattr(cfg, "noise_use_same_gate", True) else getattr(cfg, "noise_t_gate", (0.0, 0.7)),
+                    cfg.sched_shape
+                )
+                beta = getattr(cfg, "noise_beta0", 0.0) * beta_gate
+                
+                if (beta > 0.0) and (v_est is not None):
+                    xi = torch.randn_like(g_proj)                       # 与 g_proj 同形状/设备/dtype
+                    xi = project_partial_orth(xi, v_est, 1.0)           # 对基流“完全正交”
+                    # 位移形态噪声：||noise|| ~ sqrt(2*beta)*sqrt(dt)
+                    noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
+                else:
+                    noise_disp = torch.zeros_like(g_proj)
+                
+                # 合并：体积位移 + 噪声位移（都在 latent 空间）
+                u = g_proj + noise_disp
+                
+                # 与原逻辑一致：统一信赖域限幅（作用在“合力位移 u”上）
                 base_disp = (v_est * dt_unit) if v_est is not None else z
                 disp_cap  = cfg.gamma_max_ratio * batched_norm(base_disp)
                 raw_disp  = batched_norm(u) * dt_unit
                 scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (raw_disp + 1e-12))
-
+                
+                # 最终写回（位移）
                 delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * (u * dt_unit)
+
 
                 delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
                 lat_new[s:e] = lat_new[s:e] + delta_tr

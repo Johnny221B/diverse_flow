@@ -5,7 +5,7 @@ Unified Image Evaluation Tool
 - For each generated folder, compute:
   * Vendi Score (pixel & inception embedding)
   * FID (against a shared real/reference folder)
-  * CLIP Score (using local OpenAI CLIP JIT if provided; fallback to open_clip if available)
+  * CLIP Score (using local OpenAI CLIP JIT; no model fallback)
   * 1 - MS-SSIM (diversity)
   * BRISQUE (quality)
 - Reuses: one InceptionV3 (for FID) and cached features of the real set across all folders.
@@ -14,7 +14,7 @@ Dependencies:
   torch, torchvision, PIL, numpy, tqdm, skimage, opencv-python
   vendi_score (image_utils, vendi)
   piq (FID, BRISQUELoss); optional but recommended
-  open_clip_torch (optional; fallback for CLIP score if no JIT)
+  open_clip_torch (optional; only for tokenize if available)
 """
 
 import argparse
@@ -41,7 +41,7 @@ except ImportError:
     InceptionV3 = None
 
 try:
-    import open_clip  # only used if JIT is not available
+    import open_clip  # only used for tokenize if available
 except ImportError:
     open_clip = None
 
@@ -207,66 +207,89 @@ def compute_fid_from_features(real_features: torch.Tensor, fake_features: torch.
     return float(value)
 
 # -------------------------------
-# CLIP score (prefer local JIT; fallback open_clip)
+# CLIP score (use same OpenAI JIT as pipeline; no model fallback)
 # -------------------------------
 def load_clip_from_jit(jit_path: Path):
     model = torch.jit.load(str(jit_path), map_location="cpu").eval()
-    preprocess = T.Compose([
-        T.Resize(224, interpolation=T.InterpolationMode.BICUBIC),
-        T.CenterCrop(224),
-        T.ToTensor(),
-        T.Normalize((0.48145466, 0.4578275, 0.40821073),
-                    (0.26862954, 0.26130258, 0.27577711)),
-    ])
-    return model, preprocess
-
-def load_clip_fallback_openclip(device: torch.device):
-    if open_clip is None:
-        return None, None, None
-    # Use a widely available config; weights download may be required.
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        "ViT-B-32", pretrained="laion2b_s34b_b79k", device=device
-    )
-    tokenizer = open_clip.get_tokenizer("ViT-B-32")
-    model.eval()
-    return model, preprocess, tokenizer
+    return model
 
 def calculate_clip_score(
     image_folder: Path,
     model: Any,
-    preprocess: T.Compose,
+    preprocess: T.Compose,                 # kept for signature compatibility (unused)
     device: torch.device,
     batch_size: int,
-    tokenizer=None,
-    is_openclip: bool = False
+    tokenizer=None,                        # if None, try open_clip.tokenize then clip.tokenize
+    is_openclip: bool = False,             # kept for signature compatibility (unused)
+    clip_image_size: int = 224,            # align with pipeline cfg.clip_image_size
 ) -> Optional[float]:
+    """
+    Compute CLIPScore using the SAME image preprocessing as the pipeline (CLIPWrapper):
+      - convert to tensor in [0,1]
+      - bilinear interpolate to (S,S) with antialias=True (no aspect-ratio keep, no center-crop)
+      - normalize with OpenAI CLIP mean/std
+    Uses the text encoder from the provided OpenAI CLIP JIT model.
+    """
     prompt = image_folder.name.replace('_', ' ').replace('-', ' ')
+
+    if tokenizer is None:
+        tok = None
+        try:
+            import open_clip
+            tok = open_clip.tokenize
+        except Exception:
+            try:
+                import clip as openai_clip
+                tok = openai_clip.tokenize
+            except Exception:
+                tok = None
+        tokenizer = tok
+
     image_paths = list(image_folder.rglob("*.jpg")) + list(image_folder.rglob("*.png"))
     if not image_paths:
         return None
+    if tokenizer is None:
+        print("No tokenizer available (open_clip or clip). Skipping CLIP Score.")
+        return None
 
-    all_scores = []
     with torch.inference_mode():
-        if is_openclip:
-            text = tokenizer([prompt]).to(device)
-            text_features = model.encode_text(text)
-        else:
-            # For OpenAI JIT, rely on open_clip tokenizer if available; otherwise, skip.
-            if open_clip is None:
-                print("open_clip not installed; cannot tokenize text for JIT CLIP. Skipping CLIP Score.")
-                return None
-            text = open_clip.tokenize([prompt]).to(device)
-            text_features = model.encode_text(text)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        text_tokens = tokenizer([prompt]).to(device)
+        text_features = model.encode_text(text_tokens)
+        text_features = text_features / (text_features.norm(dim=-1, keepdim=True) + 1e-12)
 
+    mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=device).view(1, 3, 1, 1)
+    std  = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=device).view(1, 3, 1, 1)
+
+    to_tensor = T.ToTensor()
+    all_scores: List[float] = []
+
+    with torch.inference_mode():
         for i in tqdm(range(0, len(image_paths), batch_size), desc=f"CLIP Score: {image_folder.name}"):
             batch_paths = image_paths[i:i + batch_size]
-            images = [preprocess(Image.open(p).convert("RGB")) for p in batch_paths]
-            image_batch = torch.stack(images).to(device)
-            image_features = model.encode_image(image_batch)
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            sim = (100.0 * image_features @ text_features.T).squeeze(-1).detach().cpu().numpy()
-            all_scores.extend(sim.tolist())
+            imgs = []
+            for p in batch_paths:
+                try:
+                    imgs.append(to_tensor(Image.open(p).convert("RGB")))
+                except Exception:
+                    continue
+            if not imgs:
+                continue
+
+            x = torch.stack(imgs, dim=0).to(device=device, dtype=torch.float32)  # [B,3,H,W]
+
+            if x.shape[-2:] != (clip_image_size, clip_image_size):
+                x = F.interpolate(
+                    x, size=(clip_image_size, clip_image_size),
+                    mode="bilinear", align_corners=False, antialias=True
+                )
+
+            x = (x - mean) / std
+
+            image_features = model.encode_image(x)
+            image_features = image_features / (image_features.norm(dim=-1, keepdim=True) + 1e-12)
+
+            sim = (100.0 * (image_features @ text_features.T)).squeeze(-1).detach().cpu().tolist()
+            all_scores.extend(sim)
 
     return float(np.mean(all_scores)) if all_scores else None
 
@@ -350,8 +373,6 @@ def _nan_to_none(obj):
         return [_nan_to_none(v) for v in obj]
     return obj
 
-# python eval_imgs.py --gen /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_An_airplane_wing_pointed_toward_the_ground --real /mnt/data6t/yyz/flow_grpo/flow_base/BeyondFID/datasets/ADE20K/test --out /mnt/data6t/yyz/flow_grpo/flow_base/outputs/ourMethod_An_airplane_wing_pointed_toward_the_ground
-
 # -------------------------------
 # Main
 # -------------------------------
@@ -365,6 +386,7 @@ def main():
     ap.add_argument("--batch-size", type=int, default=32, help="Batch size for feature extraction.")
     ap.add_argument("--num-workers", type=int, default=4, help="DataLoader workers.")
     ap.add_argument("--clip-jit", type=str, default=os.path.expanduser("~/.cache/clip/ViT-B-32.pt"), help="Local OpenAI CLIP JIT path.")
+    ap.add_argument("--clip-image-size", type=int, default=224, help="Match pipeline CLIP image size (e.g., 224 or 336).")
     ap.add_argument("--max-pairs", type=int, default=100, help="Max pairs for MS-SSIM diversity (controls cost).")
     ap.add_argument("--eval_dir_name", type=str, default="eval")
 
@@ -388,6 +410,7 @@ def main():
     # --- Build shared tools/models ---
     # Inception for FID
     inception = _build_inception_extractor(device)
+
     # Precompute real features once (for FID)
     real_features = None
     if inception is not None:
@@ -400,27 +423,17 @@ def main():
             print("No real images found; FID will be skipped.")
             inception = None
 
-    # CLIP: prefer JIT, fallback to open_clip
+    # CLIP: use the SAME OpenAI JIT as pipeline; no model fallback
     clip_model = None
-    clip_preproc = None
-    openclip_tokenizer = None
-    clip_is_openclip = False
     jit_path = Path(args.clip_jit) if args.clip_jit else None
     if jit_path and jit_path.exists():
         try:
-            clip_model, clip_preproc = load_clip_from_jit(jit_path)
-            clip_model = clip_model.to(device)
+            clip_model = load_clip_from_jit(jit_path).to(device)
             print(f"Loaded CLIP JIT from {jit_path}")
         except Exception as e:
-            print(f"Failed to load CLIP JIT: {e}. Trying open_clip fallback...")
-    if clip_model is None:
-        model, preproc, tok = load_clip_fallback_openclip(device)
-        if model is not None:
-            clip_model, clip_preproc, openclip_tokenizer = model, preproc, tok
-            clip_is_openclip = True
-            print("Loaded CLIP via open_clip fallback.")
-        else:
-            print("No CLIP available; CLIP Score will be skipped.")
+            print(f"Failed to load CLIP JIT: {e}")
+    else:
+        print(f"CLIP JIT not found at {jit_path}; CLIP Score will be skipped.")
 
     # --- Evaluate each generated folder ---
     results: Dict[str, Dict[str, Optional[float]]] = {}
@@ -452,13 +465,12 @@ def main():
             )
             fid_value = compute_fid_from_features(real_features, fake_features)
 
-        # CLIP Score
+        # CLIP Score (only if JIT available)
         clip_score = None
-        if clip_model is not None and clip_preproc is not None:
+        if clip_model is not None:
             clip_score = calculate_clip_score(
-                gen_dir, clip_model, clip_preproc, device, args.batch_size,
-                tokenizer=openclip_tokenizer if clip_is_openclip else None,
-                is_openclip=clip_is_openclip
+                gen_dir, clip_model, None, device, args.batch_size,
+                clip_image_size=args.clip_image_size
             )
 
         # 1 - MS-SSIM (diversity)
@@ -477,7 +489,7 @@ def main():
             "one_minus_ms_ssim": msssim_div,
             "brisque": brisque_quality,
         }
-        
+
         _save_per_folder_json(
             gen_dir=gen_dir,
             metrics=results[gen_dir.name],
@@ -493,3 +505,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# python eval_imgs.py \
+#   --gen /path/to/outputs/ourMethod_xxx/imgs \
+#   --real /path/to/real_dataset \
+#   --out  /path/to/outputs/ourMethod_xxx/eval_summary.json \
+#   --clip-jit ~/.cache/clip/ViT-B-32.pt \
+#   --clip-image-size 224

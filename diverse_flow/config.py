@@ -23,7 +23,7 @@ class DiversityConfig:
     update_every: int = 1 # recompute K/grad every m steps
     clip_image_size: int = 224
     angle_gate_deg: Optional[float] = None # None disables angle gating
-    leverage_alpha: float = 0.0 # >0 enables leverage weights
+    leverage_alpha: float = 0.5 # >0 enables leverage weights
     device: Optional[torch.device] = None
     noise_beta0: float = 0.0                     
     noise_use_same_gate: bool = True             

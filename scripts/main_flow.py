@@ -572,7 +572,7 @@ def parse_args():
     ap.add_argument('--G', type=int, default=4)
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
-    ap.add_argument('--steps', type=int, default=10)
+    ap.add_argument('--steps', type=int, default=30)
     ap.add_argument('--guidance', type=float, default=3.0)
     ap.add_argument('--seed', type=int, default=42)
     # 本地模型路径
@@ -581,13 +581,13 @@ def parse_args():
     ap.add_argument('--out', type=str, default=None)
     ap.add_argument('--method',type=str,default='ourMethod')
     # 多样性目标（方法相关）
-    ap.add_argument('--gamma0', type=float, default=0.12)
+    ap.add_argument('--gamma0', type=float, default=0.10)
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)   # 信赖域（先保留，可适当加大或后续移除）
-    ap.add_argument('--partial-ortho', type=float, default=0.95)     # 建议更强的正交（0.8~1.0）
-    ap.add_argument('--t-gate', type=str, default='0.5,0.9')       # 仅用于确定性体积漂移
+    ap.add_argument('--partial-ortho', type=float, default=0.90)     # 建议更强的正交（0.8~1.0）
+    ap.add_argument('--t-gate', type=str, default='0.9,0.99')       # 仅用于确定性体积漂移
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
-    ap.add_argument('--eps-logdet', type=float, default=1e-3)
+    ap.add_argument('--eps-logdet', type=float, default=1e-4)
     # 设备
     ap.add_argument('--device-transformer', type=str, default='cuda:0')
     ap.add_argument('--device-vae',         type=str, default='cuda:1')
@@ -704,7 +704,7 @@ def main():
             gamma0=args.gamma0, gamma_max_ratio=args.gamma_max_ratio,
             partial_ortho=args.partial_ortho, t_gate=(float(t0), float(t1)),
             sched_shape=args.sched_shape, clip_image_size=224,
-            leverage_alpha=0.5,
+            leverage_alpha=0.7,
         )
         vol = VolumeObjective(clip, cfg)
         _log("Volume objective ready.", args.debug)
@@ -726,7 +726,7 @@ def main():
 
         def _beta_monotone(t_norm: float, eps: float = 1e-2) -> float:
             # 早强-晚弱，幅度归一：β(1)=1, β(0)=0
-            return float(min(1.0, t_norm / (1.0 - t_norm + eps)))
+            return float(min(1.0, t_norm / (1.0 - t_norm + eps))) * 0.5
 
         def diversity_callback(ppl, i, t, kw):
             # 1) 从调度器拿“真实时间”和本步步长 Δt（严格 FM）

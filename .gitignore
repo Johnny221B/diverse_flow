@@ -24,3 +24,5 @@ __pycache__/
 /t2v_metrics/
 /evaluation/DIMCIM/
 /BeyondFID/
+/experiments/experiment1/
+/experiments/experiment3/

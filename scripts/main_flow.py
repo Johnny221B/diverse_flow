@@ -566,7 +566,7 @@ def assert_on(m, want):
 
 def parse_args():
     ap = argparse.ArgumentParser(description='Diverse SD3.5 (no-embeds, TE=Transformer device, METHOD-CONSISTENT)')
-    # 生成参数
+
     ap.add_argument('--prompt', type=str, required=True)
     ap.add_argument('--negative', type=str, default='')
     ap.add_argument('--G', type=int, default=4)
@@ -575,12 +575,12 @@ def parse_args():
     ap.add_argument('--steps', type=int, default=30)
     ap.add_argument('--guidance', type=float, default=3.0)
     ap.add_argument('--seed', type=int, default=42)
-    # 本地模型路径
+
     ap.add_argument('--model-dir', type=str, default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'stable-diffusion-3.5-medium')))
     ap.add_argument('--clip-jit', type=str, default=os.path.expanduser('~/.cache/clip/ViT-B-32.pt'))
     ap.add_argument('--out', type=str, default=None)
     ap.add_argument('--method',type=str,default='ourMethod')
-    # 多样性目标（方法相关）
+    
     ap.add_argument('--gamma0', type=float, default=0.10)
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)   # 信赖域（先保留，可适当加大或后续移除）
     ap.add_argument('--partial-ortho', type=float, default=0.90)     # 建议更强的正交（0.8~1.0）
@@ -588,14 +588,14 @@ def parse_args():
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-4)
-    # 设备
+
     ap.add_argument('--device-transformer', type=str, default='cuda:0')
     ap.add_argument('--device-vae',         type=str, default='cuda:1')
     ap.add_argument('--device-clip',        type=str, default='cuda:2')
     ap.add_argument('--device-text1',       type=str, default=None)
     ap.add_argument('--device-text2',       type=str, default=None)
     ap.add_argument('--device-text3',       type=str, default=None)
-    # 省显存 + 调试
+
     ap.add_argument('--enable-vae-tiling', action='store_true')
     ap.add_argument('--enable-xformers', action='store_true')
     ap.add_argument('--debug', action='store_true')

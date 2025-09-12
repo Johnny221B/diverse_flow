@@ -502,6 +502,7 @@ SD3.5 本地 + CLIP 多样性增强（方法一致版）
 """
 import os, sys, argparse, traceback, time
 import torch.nn as nn
+import torch.nn.functional as F
 
 def _gb(x): return f"{x/1024**3:.2f} GB"
 
@@ -584,7 +585,7 @@ def parse_args():
     ap.add_argument('--gamma0', type=float, default=0.10)
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)   # 信赖域（先保留，可适当加大或后续移除）
     ap.add_argument('--partial-ortho', type=float, default=0.90)     # 建议更强的正交（0.8~1.0）
-    ap.add_argument('--t-gate', type=str, default='0.9,0.99')       # 仅用于确定性体积漂移
+    ap.add_argument('--t-gate', type=str, default='0.80,0.99')       # 仅用于确定性体积漂移
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-4)
@@ -636,8 +637,9 @@ def main():
         from diverse_flow.config import DiversityConfig
         from diverse_flow.clip_wrapper import CLIPWrapper
         from diverse_flow.volume_objective import VolumeObjective
-        from diverse_flow.utils import project_partial_orth, batched_norm
+        from diverse_flow.utils import project_partial_orth
         from diverse_flow.utils import sched_factor as time_sched_factor
+        from diverse_flow.utils import batched_norm as _bn
 
         # 设备 + dtype
         dev_tr  = torch.device(args.device_transformer)
@@ -704,7 +706,7 @@ def main():
             gamma0=args.gamma0, gamma_max_ratio=args.gamma_max_ratio,
             partial_ortho=args.partial_ortho, t_gate=(float(t0), float(t1)),
             sched_shape=args.sched_shape, clip_image_size=224,
-            leverage_alpha=0.7,
+            leverage_alpha=0.8,
         )
         vol = VolumeObjective(clip, cfg)
         _log("Volume objective ready.", args.debug)
@@ -727,6 +729,11 @@ def main():
         def _beta_monotone(t_norm: float, eps: float = 1e-2) -> float:
             # 早强-晚弱，幅度归一：β(1)=1, β(0)=0
             return float(min(1.0, t_norm / (1.0 - t_norm + eps))) * 0.5
+        
+        def _lowpass(x, k=3):
+            pad = k // 2
+            w = torch.ones(x.size(1), 1, k, k, device=x.device, dtype=x.dtype) / (k*k)
+            return F.conv2d(x, w, padding=pad, groups=x.size(1))
 
         def diversity_callback(ppl, i, t, kw):
             # 1) 从调度器拿“真实时间”和本步步长 Δt（严格 FM）
@@ -806,19 +813,24 @@ def main():
 
                 # —— 体积力：对基流（部分/全）正交 —— #
                 g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
+                if v_est is not None:
+                    vnorm = _bn(v_est)          # [B,1]
+                    gnorm = _bn(g_proj)         # [B,1]
+                    scale_g = torch.minimum(torch.ones_like(vnorm), vnorm / (gnorm + 1e-12))
+                    g_proj = g_proj * scale_g.view(-1, 1, 1, 1)
                 div_disp = g_proj * dt_unit  # 确定性体积位移（γ 只作用这里）
 
-                # --- 正交噪声：β(t)=min(1, t/(1-t+eps))，不乘 γ ---
                 beta = _beta_monotone(t_norm, eps=1e-2)
                 if (beta > 0.0) and (v_est is not None):
                     xi = torch.randn_like(g_proj)
-                    xi = project_partial_orth(xi, v_est, 1.0)  # 对基流完全正交
+                    xi = project_partial_orth(xi, v_est, 1.0)      # 先全正交到基流
+                    xi = _lowpass(xi, k=3)                         # 低频化
+                    xi = xi - xi.mean(dim=(1,2,3), keepdim=True)
+                    xi = xi / (_bn(xi).view(-1,1,1,1) + 1e-12)
                     noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
                 else:
                     noise_disp = torch.zeros_like(g_proj)
 
-                # 可选信赖域：仅限幅体积位移（不限制噪声）
-                from diverse_flow.utils import batched_norm as _bn
                 base_disp = (v_est * dt_unit) if v_est is not None else z
                 disp_cap  = cfg.gamma_max_ratio * _bn(base_disp)
                 div_raw   = _bn(div_disp)

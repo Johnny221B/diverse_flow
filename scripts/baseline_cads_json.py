@@ -260,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # CADS hyperparams
     g = p.add_argument_group("CADS")
-    g.add_argument("--tau1", type=float, default=0.6)
+    g.add_argument("--tau1", type=float, default=0.4)
     g.add_argument("--tau2", type=float, default=0.9)
     g.add_argument("--cads-s", type=float, default=0.10, dest="cads_s")
     g.add_argument("--psi", type=float, default=1.0)

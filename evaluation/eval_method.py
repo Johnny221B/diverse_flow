@@ -469,7 +469,6 @@
 # if __name__ == "__main__":
 #     main()
 
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Batch CSV evaluator by concept for methods: dpp, pg, cads (exclude ours).
@@ -874,7 +873,7 @@ def main():
                     help="Match pipeline CLIP image size (e.g., 224 or 336).")
 
     # 可选：自定义方法列表，默认只跑 dpp/pg/cads
-    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads"],
+    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads","ourmethod"],
                     help="Methods to run (default: dpp pg cads). 'ours' will be ignored if included.")
 
     args = ap.parse_args()

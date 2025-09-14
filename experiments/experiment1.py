@@ -279,7 +279,7 @@ def autodetect_paths(outputs_root: Path, dataset_root: Path, method: str, concep
 # ----------------- CLI -----------------
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--concept", type=str, required=True, help="e.g., truck")
+    ap.add_argument("--concept", type=str, required=True, help="e.g., bus")
     ap.add_argument("--methods", type=str, required=True, help="comma-separated, e.g., 'dpp,baseline1,baseline2'")
 
     ap.add_argument("--real_dir", type=Path, default=None)

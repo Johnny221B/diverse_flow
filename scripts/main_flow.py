@@ -582,10 +582,10 @@ def parse_args():
     ap.add_argument('--out', type=str, default=None)
     ap.add_argument('--method',type=str,default='ourMethod')
     
-    ap.add_argument('--gamma0', type=float, default=0.10)
-    ap.add_argument('--gamma-max-ratio', type=float, default=0.3)   # 信赖域（先保留，可适当加大或后续移除）
-    ap.add_argument('--partial-ortho', type=float, default=0.90)     # 建议更强的正交（0.8~1.0）
-    ap.add_argument('--t-gate', type=str, default='0.80,0.99')       # 仅用于确定性体积漂移
+    ap.add_argument('--gamma0', type=float, default=0.07)
+    ap.add_argument('--gamma-max-ratio', type=float, default=0.2)   # 信赖域（先保留，可适当加大或后续移除）
+    ap.add_argument('--partial-ortho', type=float, default=0.95)     # 建议更强的正交（0.8~1.0）
+    ap.add_argument('--t-gate', type=str, default='0.90,0.98')       # 仅用于确定性体积漂移
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-4)
@@ -706,7 +706,7 @@ def main():
             gamma0=args.gamma0, gamma_max_ratio=args.gamma_max_ratio,
             partial_ortho=args.partial_ortho, t_gate=(float(t0), float(t1)),
             sched_shape=args.sched_shape, clip_image_size=224,
-            leverage_alpha=0.8,
+            leverage_alpha=0.6,
         )
         vol = VolumeObjective(clip, cfg)
         _log("Volume objective ready.", args.debug)
@@ -728,7 +728,7 @@ def main():
 
         def _beta_monotone(t_norm: float, eps: float = 1e-2) -> float:
             # 早强-晚弱，幅度归一：β(1)=1, β(0)=0
-            return float(min(1.0, t_norm / (1.0 - t_norm + eps))) * 0.5
+            return float(min(1.0, t_norm / (1.0 - t_norm + eps))) * 0.3
         
         def _lowpass(x, k=3):
             pad = k // 2
@@ -813,6 +813,7 @@ def main():
 
                 # —— 体积力：对基流（部分/全）正交 —— #
                 g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
+                g_proj = _lowpass(g_proj, k=5)
                 if v_est is not None:
                     vnorm = _bn(v_est)          # [B,1]
                     gnorm = _bn(g_proj)         # [B,1]
@@ -824,7 +825,7 @@ def main():
                 if (beta > 0.0) and (v_est is not None):
                     xi = torch.randn_like(g_proj)
                     xi = project_partial_orth(xi, v_est, 1.0)      # 先全正交到基流
-                    xi = _lowpass(xi, k=3)                         # 低频化
+                    xi = _lowpass(xi, k=5)                         # 低频化
                     xi = xi - xi.mean(dim=(1,2,3), keepdim=True)
                     xi = xi / (_bn(xi).view(-1,1,1,1) + 1e-12)
                     noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi

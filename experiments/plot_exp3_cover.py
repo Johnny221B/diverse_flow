@@ -10,12 +10,10 @@ import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-# 输出矢量友好设置
 mpl.rcParams["pdf.fonttype"] = 42
 mpl.rcParams["ps.fonttype"]  = 42
 mpl.rcParams["axes.unicode_minus"] = False
 
-# 可选：PCHIP 单调样条（无 SciPy 时自动退回线性）
 try:
     from scipy.interpolate import PchipInterpolator as _PCHIP
     _HAS_PCHIP = True
@@ -52,10 +50,6 @@ def _guidance_name_candidates(g):
 
 
 def _build_csv_path(outputs_root: Path, method: str, concept: str, guidance) -> Path | None:
-    """
-    匹配 {outputs_root}/{method}_{concept}/eval/exp3_{guidance}_{concept}.csv
-    guidance 支持多种字符串候选。
-    """
     mc_eval = outputs_root / f"{method}_{concept}" / "eval"
     for gname in _guidance_name_candidates(guidance):
         cand = mc_eval / f"exp3_{gname}_{concept}.csv"
@@ -65,10 +59,6 @@ def _build_csv_path(outputs_root: Path, method: str, concept: str, guidance) -> 
 
 
 def _read_one_guidance_df(outputs_root: Path, concept: str, methods: list[str], guidance) -> pd.DataFrame:
-    """
-    读取并合并多个方法在同一个 guidance 下的 CSV。
-    期望列：method, concept, guidance, k, tau, coverage_mean, coverage_std
-    """
     csv_paths = []
     for m in methods:
         p = _build_csv_path(outputs_root, m, concept, guidance)
@@ -99,10 +89,6 @@ def _read_one_guidance_df(outputs_root: Path, concept: str, methods: list[str], 
 
 
 def _smooth_xy(x, y, x_dense):
-    """
-    平滑插值：优先使用 PCHIP 单调样条；失败或无 SciPy 时回退到线性插值。
-    对边界外不外推，使用端点值。
-    """
     x = np.asarray(x, float); y = np.asarray(y, float); xd = np.asarray(x_dense, float)
 
     # 去重 & 严格递增
@@ -200,21 +186,17 @@ def plot_cov_tau_panel(
 
         ax.set_title(f"guidance={float(g):.1f}", fontsize=11)
 
-        # —— 只在中间子图显示“tau”这个轴名称；三幅子图的刻度数字都保留 ——
         if idx == mid_idx:
-            ax.set_xlabel("tau")                     # 中间子图：显示轴名称
+            ax.set_xlabel("tau")                    
             ax.tick_params(axis="x", labelbottom=True, bottom=True)
         else:
-            ax.set_xlabel("")                        # 其它子图：不显示轴名称
-            ax.tick_params(axis="x", labelbottom=True, bottom=True)  # 但刻度数字保留
+            ax.set_xlabel("")                        
+            ax.tick_params(axis="x", labelbottom=True, bottom=True)  
 
-    # 左侧 y 轴标签
     axes[0].set_ylabel("coverage")
 
-    # 单一全局图例（仅包含实际画出来的方法）
     legend_methods = [m for m in methods if m in plotted_methods] or methods
 
-    # 根据 legend_loc 选锚点：upper 用顶部，其他用底部
     anchor = (0.5, 1.12) if isinstance(legend_loc, str) and legend_loc.lower().startswith("upper") else (0.5, -0.02)
 
     fig.legend(
@@ -259,7 +241,7 @@ def _main():
     ap.add_argument("--tau_min",    type=float, default=0.05)
     ap.add_argument("--tau_max",    type=float, default=0.65)
     ap.add_argument("--dense",      type=int,   default=200, help="平滑曲线的密度（点数）")
-    ap.add_argument("--legend_loc", type=str,   default="upper center",
+    ap.add_argument("--legend_loc", type=str,   default="upper right",
                     help="图例位置，如 'upper center', 'lower center', 'upper right' 等")
     ap.add_argument("--no_points",  action="store_true", help="不画原始采样点")
     args = ap.parse_args()

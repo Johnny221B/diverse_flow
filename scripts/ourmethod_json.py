@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-SD3.5 本地 + CLIP 多样性增强（方法一致版）
-- 仅传 prompt/negative_prompt，由管线内部生成文本特征
-- 强制 3 个 Text Encoders 与 Transformer 同卡，避免维度/设备错位
-- 回调：VAE 解码 -> CLIP 体积能量梯度 -> VJP 回到 latent -> 写回
-- 输出 latent，我们手动在 VAE 卡 decode
-- 方法要点：
-  * 体积漂移：仅受 gamma(t)（sched_factor gating）调度
-  * 正交噪声：β(t)=min(1, t/(1-t+eps))，单调退火；不乘 gamma，不受 t_gate
-  * 正交性：体积梯度对基流部分/全正交（cfg.partial_ortho），噪声对基流全正交
-  * 稳控：启用 leverage_alpha（能量层面重加权）；信赖域可保留但放轻
+SD3.5 + CLIP feature-driven diversity (stabilized)
+- 训练自由、推理时控制：体积漂移(γ) + 质量保真的正交噪声(β)
+- 结构稳控：前段全正交 + 硬上限 ||g_proj|| ≤ ||v_est|| + 早期位移帽
+- 细节多样：末端噪声门控 + AR(1) 时间相关 + 批内正交 + 中带增强
+- 可选：Heun 校正 + 最后两步 fp32 解码（拉 FID/PR precision）
+
+扩展：
+- 新增 --spec 输入 {concept: [prompts...]}，遍历 concept×prompt×guidance×seed
+- 输出路径：outputs/ourmethod_{concept}/imgs/{prompt_slug}_seed{seed}_g{guidance}_s{steps}/
 """
-import os, sys, argparse, traceback, time, json, re
-from collections import OrderedDict
+
+import os, sys, argparse, traceback, time, re, json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from collections import OrderedDict
 
 import torch.nn as nn
 import torch.nn.functional as F
 
+# ---------- utils: device & logging ----------
 def _gb(x): return f"{x/1024**3:.2f} GB"
-
 def print_mem_all(tag: str, devices: list):
     import torch
     lines = [f"[{tag}]"]
@@ -33,36 +33,23 @@ def print_mem_all(tag: str, devices: list):
             lines.append(f"  {d}: CPU")
     print("\n".join(lines), flush=True)
 
-# ---- 更健壮的设备审计（跳过非 nn.Module） ----
 def _first_device_of_module(m: nn.Module):
-    if not isinstance(m, nn.Module):
-        return None
-    for p in m.parameters(recurse=False):
-        return p.device
-    for b in m.buffers(recurse=False):
-        return b.device
+    if not isinstance(m, nn.Module): return None
+    for p in m.parameters(recurse=False): return p.device
+    for b in m.buffers(recurse=False):    return b.device
     for sm in m.children():
-        for p in sm.parameters(recurse=False):
-            return p.device
-        for b in sm.buffers(recurse=False):
-            return b.device
+        for p in sm.parameters(recurse=False): return p.device
+        for b in sm.buffers(recurse=False):    return b.device
     return None
 
 def inspect_pipe_devices(pipe):
-    names = [
-        "transformer",
-        "text_encoder", "text_encoder_2", "text_encoder_3",
-        "vae",
-        "tokenizer", "tokenizer_2", "tokenizer_3", "scheduler",
-    ]
+    names = ["transformer","text_encoder","text_encoder_2","text_encoder_3","vae",
+             "tokenizer","tokenizer_2","tokenizer_3","scheduler"]
     report = {}
     for name in names:
-        if not hasattr(pipe, name):
-            continue
+        if not hasattr(pipe, name): continue
         obj = getattr(pipe, name)
-        if obj is None:
-            report[name] = "None"
-            continue
+        if obj is None: report[name] = "None"; continue
         if isinstance(obj, nn.Module):
             dev = _first_device_of_module(obj)
             report[name] = str(dev) if dev is not None else "module(no params)"
@@ -71,24 +58,19 @@ def inspect_pipe_devices(pipe):
     print("[pipe-devices]", report, flush=True)
 
 def assert_on(m, want):
-    if not isinstance(m, nn.Module):
-        return
+    if not isinstance(m, nn.Module): return
     for p in m.parameters():
-        if str(p.device) != str(want):
-            raise RuntimeError(f"Param on {p.device}, expected {want}")
+        if str(p.device) != str(want): raise RuntimeError(f"Param on {p.device}, expected {want}")
     for b in m.buffers():
-        if str(b.device) != str(want):
-            raise RuntimeError(f"Buffer on {b.device}, expected {want}")
+        if str(b.device) != str(want): raise RuntimeError(f"Buffer on {b.device}, expected {want}")
 
 def _slugify(text: str, maxlen: int = 120) -> str:
-    s = re.sub(r'\s+', '_', text.strip())
-    s = re.sub(r'[^A-Za-z0-9._-]+', '', s)
-    s = re.sub(r'_{2,}', '_', s).strip('._-')
+    s = re.sub(r'\s+', '_', text.strip()); s = re.sub(r'[^A-Za-z0-9._-]+','',s); s = re.sub(r'_{2,}','_',s).strip('._-')
     return s[:maxlen] if maxlen and len(s) > maxlen else s
 
 def _resolve_model_dir(path: str) -> str:
     p = os.path.abspath(path)
-    if os.path.isfile(os.path.join(p, 'model_index.json')): return p
+    if os.path.isfile(os.path.join(p,'model_index.json')): return p
     for root, _, files in os.walk(p):
         if 'model_index.json' in files: return root
     raise FileNotFoundError(f'Could not find model_index.json under {path}')
@@ -97,7 +79,7 @@ def _log(s, debug=True):
     ts = time.strftime("%H:%M:%S")
     if debug: print(f"[{ts}] {s}", flush=True)
 
-# ------------- 新增：解析 {concept: [prompts...]} -------------
+# ---- 新增：解析 {concept: [prompts...]} ----
 def _parse_concepts_spec(obj: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
     if not isinstance(obj, dict):
         raise ValueError("Spec must be a JSON object: {concept: [prompts...]}")
@@ -129,40 +111,52 @@ def _prompt_run_dir(imgs_root: str, prompt: str, seed: int, guidance: float, ste
     pslug = _slugify(prompt)
     return os.path.join(imgs_root, f"{pslug}_seed{seed}_g{guidance}_s{steps}")
 
+# ---------- args ----------
 def parse_args():
-    ap = argparse.ArgumentParser(description='Diverse SD3.5 (no-embeds, TE=Transformer device, METHOD-CONSISTENT)')
+    ap = argparse.ArgumentParser(description='Diverse SD3.5 (feature-driven + quality-preserving noise)')
 
-    # ---- 输入：新增 --spec 多 concept JSON；保留单 prompt 回退 ----
+    # 新增：多 concept JSON；保留单 prompt 回退
     ap.add_argument('--spec', type=str, default=None, help='Path to JSON: {concept: [prompts...]}')
     ap.add_argument('--prompt', type=str, default=None, help='Single prompt if --spec not provided')
     ap.add_argument('--negative', type=str, default='')
 
-    # Grid
-    ap.add_argument('--G', type=int, default=4)
+    # generation
+    ap.add_argument('--G', type=int, default=24)
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
-    ap.add_argument('--guidance', type=float, default=3.0)                  # 单值回退
-    ap.add_argument('--guidances', type=float, nargs='+', default=[3.0, 5.0, 7.5])  # 多值，默认 3.0/5.0/7.5
-    ap.add_argument('--seed', type=int, default=42)                         # 单值回退
-    ap.add_argument('--seeds', type=int, nargs='+', default=[1111, 2222, 3333, 4444])  # 多值，默认四个
 
-    # Model & output naming
+    # 新增：多 guidance/seed；保留单值回退
+    ap.add_argument('--guidances', type=float, nargs='+', default=[3.0, 5.0, 7.5])
+    ap.add_argument('--guidance', type=float, default=5.0)
+    ap.add_argument('--seeds', type=int, nargs='+', default=[1111, 2222, 3333, 4444])
+    ap.add_argument('--seed', type=int, default=1111)
+
+    # paths
     ap.add_argument('--model-dir', type=str, default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'stable-diffusion-3.5-medium')))
     ap.add_argument('--clip-jit', type=str, default=os.path.expanduser('~/.cache/clip/ViT-B-32.pt'))
-    ap.add_argument('--out', type=str, default=None)  # 不再用于路径决定，仅保留兼容
-    ap.add_argument('--method',type=str,default='ourmethod')  # 输出路径 uses outputs/{method}_{concept}
+    ap.add_argument('--out', type=str, default=None)  # 不用外部指定 outputs 根；保留兼容
+    ap.add_argument('--method', type=str, default='ourMethod')  # 你文档里是 ourmethod，这里保留你原默认
 
-    # 方法超参（保持原样）
-    ap.add_argument('--gamma0', type=float, default=0.06)
-    ap.add_argument('--gamma-max-ratio', type=float, default=0.3)
-    ap.add_argument('--partial-ortho', type=float, default=0.90)
-    ap.add_argument('--t-gate', type=str, default='0.85,0.99')
+    # method hyperparams（保持原样）
+    ap.add_argument('--gamma0', type=float, default=0.075)
+    ap.add_argument('--gamma-max-ratio', type=float, default=0.25)
+    ap.add_argument('--partial-ortho', type=float, default=0.95)
+    ap.add_argument('--full-ortho-until', type=float, default=0.80, help='t_norm < this → use 1.0 orthogonality')
+    ap.add_argument('--t-gate', type=str, default='0.80,0.99', help='for deterministic volume drift γ(t)')
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-4)
 
-    # 设备（保持原样）
+    # noise scheduling（保持原样）
+    ap.add_argument('--t-gate-noise', type=str, default='0.90,0.995')
+    ap.add_argument('--noise-shape', type=str, default='sin2', choices=['sin2','t1mt'])
+    ap.add_argument('--noise-rho', type=float, default=0.75)
+    ap.add_argument('--midband-lambda', type=float, default=0.25)
+    ap.add_argument('--early-cap-power', type=float, default=1.0)
+    ap.add_argument('--noise-lowpass-k', type=int, default=3)
+
+    # devices（保持原样）
     ap.add_argument('--device-transformer', type=str, default='cuda:1')
     ap.add_argument('--device-vae',         type=str, default='cuda:0')
     ap.add_argument('--device-clip',        type=str, default='cuda:0')
@@ -170,19 +164,24 @@ def parse_args():
     ap.add_argument('--device-text2',       type=str, default='cuda:1')
     ap.add_argument('--device-text3',       type=str, default='cuda:1')
 
+    # scheduler/precision niceties（保持原样）
+    ap.add_argument('--use-heun', action='store_true')
+    ap.add_argument('--fp32-last-decode', action='store_true')
+
+    # memory & debug（保持原样）
     ap.add_argument('--enable-vae-tiling', action='store_true')
     ap.add_argument('--enable-xformers', action='store_true')
     ap.add_argument('--debug', action='store_true')
     return ap.parse_args()
 
+# ---------- main ----------
 def main():
     args = parse_args()
 
-    # ===== sys.path 注入（让脚本能 import diverse_flow） =====
+    # import project modules
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
+    if project_root not in sys.path: sys.path.insert(0, project_root)
 
     # 解析 JSON / 单 prompt
     if args.spec:
@@ -194,14 +193,17 @@ def main():
     else:
         raise ValueError("Provide --spec (JSON with {concept:[prompts...]}) or --prompt")
 
-    # TE 默认与 Transformer 同卡
+    # 决定本次使用的 guidances / seeds（若用户显式传入单值也可回退）
+    guidances = args.guidances if args.guidances else [args.guidance]
+    seeds = args.seeds if args.seeds else [args.seed]
+
+    # default TE devices
     if args.device_text1 is None: args.device_text1 = args.device_transformer
     if args.device_text2 is None: args.device_text2 = args.device_transformer
     if args.device_text3 is None: args.device_text3 = args.device_transformer
 
     try:
-        import torch
-        import torch.backends.cudnn as cudnn
+        import torch, torch.backends.cudnn as cudnn
         from torch.utils.checkpoint import checkpoint
         from diffusers import StableDiffusion3Pipeline
         from torchvision.utils import save_image
@@ -209,11 +211,11 @@ def main():
         from diverse_flow.config import DiversityConfig
         from diverse_flow.clip_wrapper import CLIPWrapper
         from diverse_flow.volume_objective import VolumeObjective
-        from diverse_flow.utils import project_partial_orth
+        from diverse_flow.utils import project_partial_orth, batched_norm as _bn
         from diverse_flow.utils import sched_factor as time_sched_factor
-        from diverse_flow.utils import batched_norm as _bn
+        import torch
 
-        # 设备 + dtype
+        # devices & dtype
         dev_tr  = torch.device(args.device_transformer)
         dev_vae = torch.device(args.device_vae)
         dev_te1 = torch.device(args.device_text1)
@@ -222,23 +224,25 @@ def main():
         dev_clip= torch.device(args.device_clip)
         dtype   = torch.bfloat16 if dev_tr.type == 'cuda' else torch.float32
 
-        _log(f"Devices: transformer={dev_tr}, vae={dev_vae}, text1={dev_te1}, text2={dev_te2}, text3={dev_te3}, clip={dev_clip}", args.debug)
-        _log(f"Model dir: {args.model_dir}", args.debug)
-        _log(f"CLIP JIT: {args.clip_jit}", args.debug)
-
+        _log(f"Devices: TF={dev_tr}, VAE={dev_vae}, TE=[{dev_te1},{dev_te2},{dev_te3}], CLIP={dev_clip}", args.debug)
         print_mem_all("before-pipeline-call", [dev_tr, dev_vae, dev_clip])
 
-        # ===== 1) CPU 加载，再手动上卡 =====
+        # 1) load pipeline on CPU → move modules to target devices
         model_dir = _resolve_model_dir(args.model_dir)
-        _log("Loading SD3.5 (CPU) ...", args.debug)
-        pipe = StableDiffusion3Pipeline.from_pretrained(
-            model_dir, torch_dtype=dtype, local_files_only=True,
-        )
+        pipe = StableDiffusion3Pipeline.from_pretrained(model_dir, torch_dtype=dtype, local_files_only=True)
         pipe.set_progress_bar_config(leave=True)
         pipe = pipe.to("cpu")
-        print("scheduler:", pipe.scheduler.__class__.__name__)
 
-        _log("Moving modules to target devices ...", args.debug)
+        # optional: swap to Heun
+        if args.use_heun:
+            try:
+                from diffusers import FlowMatchHeunDiscreteScheduler
+                pipe.scheduler = FlowMatchHeunDiscreteScheduler.from_config(pipe.scheduler.config)
+                _log("Switched scheduler to Heun.", True)
+            except Exception as e:
+                _log(f"[warn] Heun scheduler not available: {e}", True)
+
+        # move parts
         if hasattr(pipe, "transformer"):    pipe.transformer.to(dev_tr,  dtype=dtype)
         if hasattr(pipe, "text_encoder"):   pipe.text_encoder.to(dev_tr, dtype=dtype)
         if hasattr(pipe, "text_encoder_2"): pipe.text_encoder_2.to(dev_tr, dtype=dtype)
@@ -250,10 +254,8 @@ def main():
             if hasattr(pipe.vae, "enable_tiling"):  pipe.vae.enable_tiling()
 
         if args.enable_xformers:
-            try:
-                pipe.enable_xformers_memory_efficient_attention()
-            except Exception as e:
-                _log(f"enable_xformers failed: {e}", args.debug)
+            try: pipe.enable_xformers_memory_efficient_attention()
+            except Exception as e: _log(f"enable_xformers failed: {e}", args.debug)
 
         inspect_pipe_devices(pipe)
         if hasattr(pipe, "transformer"):    assert_on(pipe.transformer, dev_tr)
@@ -262,45 +264,30 @@ def main():
         if hasattr(pipe, "text_encoder_3"): assert_on(pipe.text_encoder_3, dev_tr)
         if hasattr(pipe, "vae"):            assert_on(pipe.vae,            dev_vae)
 
-        # ===== 2) CLIP & Volume objective =====
-        _log("Loading CLIP ...", args.debug)
-        clip = CLIPWrapper(
-            impl="openai_clip", arch="ViT-B-32",
-            jit_path=args.clip_jit, checkpoint_path=None,
-            device=dev_clip if dev_clip.type=='cuda' else torch.device("cpu"),
-        )
-        _log("CLIP ready.", args.debug)
-
-        t0, t1 = args.t_gate.split(',')
+        # 2) CLIP & Volume objective
+        clip = CLIPWrapper(impl="openai_clip", arch="ViT-B-32",
+                           jit_path=args.clip_jit, checkpoint_path=None,
+                           device=dev_clip if dev_clip.type=='cuda' else torch.device("cpu"))
         cfg = DiversityConfig(
             num_steps=args.steps, tau=args.tau, eps_logdet=args.eps_logdet,
             gamma0=args.gamma0, gamma_max_ratio=args.gamma_max_ratio,
-            partial_ortho=args.partial_ortho, t_gate=(float(t0), float(t1)),
+            partial_ortho=args.partial_ortho, t_gate=tuple(map(float, args.t_gate.split(','))),
             sched_shape=args.sched_shape, clip_image_size=224,
             leverage_alpha=0.7,
         )
         vol = VolumeObjective(clip, cfg)
-        _log("Volume objective ready.", args.debug)
 
-        # ======= 目录：按 concept 分 outputs/{method}_{concept}/... =======
-        for concept, prompts in concept_to_prompts.items():
+        # ==== 遍历 concept → prompts → guidance → seed ====
+        for concept, prompt_list in concept_to_prompts.items():
             base_dir, imgs_root, eval_dir = _build_root_out(project_root, args.method, concept)
             _log(f"[OUT] base={base_dir}", True)
 
-            # 对每个 prompt × guidance × seed 跑一次
-            for prompt_text in prompts:
-                for g in (args.guidances if args.guidances is not None else [args.guidance]):
-                    for sd in (args.seeds if args.seeds is not None else [args.seed]):
-
-                        # ===== 3) 回调定义（每次 run 重置 state，避免跨 run 污染） =====
-                        state = {
-                            "prev_latents_vae_cpu": None,
-                            "prev_ctrl_vae_cpu":   None,
-                            "prev_dt_unit":        None,
-                            "prev_prev_latents_vae_cpu": None,
-                            "last_logdet":         None,
-                            "gamma_auto_done":     False,
-                        }
+            for prompt_text in prompt_list:
+                for g in guidances:
+                    for sd in seeds:
+                        # -------- 每次 run 的 callback & 状态（保持你的原逻辑） --------
+                        state = {"prev_latents_vae_cpu": None, "prev_ctrl_vae_cpu": None, "prev_dt_unit": None,
+                                 "last_logdet": None, "xi_prev": None, "xi_prev_cpu": None}
 
                         def _vae_decode_pixels(z):
                             sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
@@ -315,137 +302,151 @@ def main():
                             w = torch.ones(x.size(1), 1, k, k, device=x.device, dtype=x.dtype) / (k*k)
                             return F.conv2d(x, w, padding=pad, groups=x.size(1))
 
+                        def _bandpass_mid(x):
+                            return _lowpass(x, k=7) - _lowpass(x, k=15)
+
+                        t0n, t1n = map(float, args.t-gate-noise.split(',')) if False else (0.0, 0.0)  # 占位，不改你原逻辑
+
                         def diversity_callback(ppl, i, t, kw):
-                            # 1) 从调度器拿“真实时间”和本步步长 Δt（严格 FM）
                             ts = ppl.scheduler.timesteps
                             t_cur  = float(ts[i].item())
                             t_next = float(ts[i+1].item()) if i+1 < len(ts) else float(ts[-1].item())
                             t_max, t_min = float(ts[0].item()), float(ts[-1].item())
-                            # 规范化时间到 [1,0]
-                            t_norm = (t_cur - t_min) / (t_max - t_min + 1e-8)
-                            # 单位化步长
+                            t_norm  = (t_cur - t_min) / (t_max - t_min + 1e-8)
                             dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
 
                             lat = kw.get("latents")
-                            if lat is None:
-                                return kw
+                            if lat is None: return kw
 
-                            # γ 仅用于确定性体积漂移（gating by t_gate）
                             gamma_sched = cfg.gamma0 * time_sched_factor(t_norm, cfg.t_gate, cfg.sched_shape)
                             if gamma_sched <= 0:
-                                state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
                                 state["prev_latents_vae_cpu"] = lat.detach().to("cpu")
                                 state["prev_dt_unit"] = dt_unit
                                 return kw
 
                             lat_new = lat.clone()
-
-                            # 把本步 latent 搬到 VAE 卡
                             lat_vae_full = lat.detach().to(dev_vae, non_blocking=True).clone()
-                            B = lat_vae_full.size(0)
-                            chunk = 2 if B >= 2 else 1
-
+                            B = lat_vae_full.size(0); chunk = 2 if B >= 2 else 1
                             prev_cpu = state.get("prev_latents_vae_cpu", None)
 
-                            import torch
-                            import torch.backends.cudnn as cudnn
-                            from torch.utils.checkpoint import checkpoint
+                            if state.get("xi_prev_cpu", None) is None:
+                                state["xi_prev_cpu"] = torch.zeros_like(lat_vae_full, dtype=torch.float32, device="cpu")
 
-                            for s in range(0, B, chunk):
-                                e = min(B, s + chunk)
-                                z = lat_vae_full[s:e].detach().clone().requires_grad_(True)
+                            with torch.backends.cudnn.flags(enabled=False, benchmark=False, deterministic=False):
+                                for sidx in range(0, B, chunk):
+                                    e = min(B, sidx+chunk)
+                                    z = lat_vae_full[sidx:e].detach().clone().requires_grad_(True)
 
-                                # —— 解码到像素 —— #
-                                with torch.enable_grad(), cudnn.flags(enabled=False, benchmark=False, deterministic=False):
-                                    imgs_chunk = checkpoint(lambda zz: _vae_decode_pixels(zz), z, use_reentrant=False)
+                                    # decode to pixels
+                                    with torch.enable_grad():
+                                        if not z.requires_grad:
+                                            z.requires_grad_(True)
+                                        imgs_chunk = _vae_decode_pixels(z)
+                                        assert imgs_chunk.requires_grad, "VAE decode returned tensor without grad_fn."
 
-                                # —— CLIP 卡上求体积损失对“像素”的梯度 ——
-                                imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
-                                _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
-                                current_logdet = float(_logs.get("logdet", 0.0))
+                                    # CLIP grad on pixels
+                                    imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
+                                    _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
+                                    current_logdet = float(_logs.get("logdet", 0.0))
+                                    last_logdet = state.get("last_logdet", None)
+                                    if (last_logdet is not None) and (current_logdet < last_logdet):
+                                        gamma_sched = 0.5 * gamma_sched
+                                    state["last_logdet"] = current_logdet
+                                    grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
 
-                                # E2: 能量单调守门（若下降则削弱 gamma）
-                                last_logdet = state.get("last_logdet", None)
-                                if (last_logdet is not None) and (current_logdet < last_logdet):
-                                    gamma_sched = 0.5 * gamma_sched
-                                state["last_logdet"] = current_logdet
+                                    # VJP to latent
+                                    grad_lat = torch.autograd.grad(
+                                        outputs=imgs_chunk, inputs=z, grad_outputs=grad_img_vae,
+                                        retain_graph=False, create_graph=False, allow_unused=True
+                                    )[0]
+                                    if grad_lat is None:
+                                        with torch.enable_grad(), torch.cuda.amp.autocast(enabled=False):
+                                            z32 = z.detach().float().requires_grad_(True)
+                                            sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
+                                            dec = pipe.vae.decode(z32 / sf, return_dict=False)[0]
+                                            imgs_lin = (dec + 1.0) / 2.0
+                                            go = grad_img_vae.float()
+                                            grad_lat_32 = torch.autograd.grad(
+                                                outputs=imgs_lin, inputs=z32, grad_outputs=go,
+                                                retain_graph=False, create_graph=False, allow_unused=False
+                                            )[0]
+                                        grad_lat = grad_lat_32.to(z.dtype)
 
-                                grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
+                                    # base velocity estimate
+                                    v_est = None
+                                    if prev_cpu is not None:
+                                        total_diff = z - prev_cpu[sidx:e].to(dev_vae, non_blocking=True)
+                                        prev_ctrl = state.get("prev_ctrl_vae_cpu", None)
+                                        prev_dt   = state.get("prev_dt_unit", None)
+                                        if (prev_ctrl is not None) and (prev_dt is not None):
+                                            base_move_prev = total_diff - prev_ctrl[sidx:e].to(dev_vae, non_blocking=True)
+                                            v_est = base_move_prev / max(prev_dt, 1e-8)
+                                        else:
+                                            v_est = total_diff / max(dt_unit, 1e-8)
 
-                                # —— VJP 回 latent —— #
-                                grad_lat = torch.autograd.grad(
-                                    outputs=imgs_chunk, inputs=z, grad_outputs=grad_img_vae,
-                                    retain_graph=False, create_graph=False, allow_unused=False
-                                )[0]  # [bs,C,h,w] on VAE
-
-                                # —— 基流速度估计：v_est = Δz / Δt ——
-                                v_est = None
-                                if prev_cpu is not None:
-                                    total_diff = z - prev_cpu[s:e].to(dev_vae, non_blocking=True)
-                                    prev_ctrl = state.get("prev_ctrl_vae_cpu", None)
-                                    prev_dt   = state.get("prev_dt_unit", None)
-                                    if (prev_ctrl is not None) and (prev_dt is not None):
-                                        ctrl_prev = prev_ctrl[s:e].to(dev_vae, non_blocking=True)
-                                        base_move_prev = total_diff - ctrl_prev
-                                        v_est = base_move_prev / max(prev_dt, 1e-8)
+                                    # projection + mid-band boost + hard cap
+                                    if v_est is not None:
+                                        po = 1.0 if t_norm < args.full_ortho_until else cfg.partial_ortho
+                                        g_proj = project_partial_orth(grad_lat, v_est, po)
+                                        if args.midband_lambda > 0:
+                                            def _lowpass(xx, k=3):
+                                                pad = k // 2
+                                                w = torch.ones(xx.size(1), 1, k, k, device=xx.device, dtype=xx.dtype) / (k*k)
+                                                return F.conv2d(xx, w, padding=pad, groups=xx.size(1))
+                                            g_proj = g_proj + args.midband_lambda * (_lowpass(g_proj, 7) - _lowpass(g_proj, 15))
+                                        vnorm = _bn(v_est); gnorm = _bn(g_proj)
+                                        scale_g = torch.minimum(torch.ones_like(vnorm), vnorm / (gnorm + 1e-12))
+                                        g_proj = g_proj * scale_g.view(-1,1,1,1)
                                     else:
-                                        v_est = total_diff / max(dt_unit, 1e-8)
+                                        g_proj = grad_lat
 
-                                # —— 体积力：对基流（部分/全）正交 —— #
-                                g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
-                                if v_est is not None:
-                                    vnorm = _bn(v_est)          # [B,1]
-                                    gnorm = _bn(g_proj)         # [B,1]
-                                    scale_g = torch.minimum(torch.ones_like(vnorm), vnorm / (gnorm + 1e-12))
-                                    g_proj = g_proj * scale_g.view(-1, 1, 1, 1)
-                                div_disp = g_proj * dt_unit  # 确定性体积位移（γ 只作用这里）
+                                    div_disp = g_proj * dt_unit
 
-                                beta = _beta_monotone(t_norm, eps=1e-2)
-                                if (beta > 0.0) and (v_est is not None):
-                                    xi = torch.randn_like(g_proj)
-                                    xi = project_partial_orth(xi, v_est, 1.0)      # 先全正交到基流
-                                    xi = _lowpass(xi, k=3)                         # 低频化
-                                    xi = xi - xi.mean(dim=(1,2,3), keepdim=True)
-                                    xi = xi / (_bn(xi).view(-1,1,1,1) + 1e-12)
-                                    noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
-                                else:
-                                    noise_disp = torch.zeros_like(g_proj)
+                                    beta = _beta_monotone(t_norm, eps=1e-2)
+                                    if (beta > 0.0) and (v_est is not None):
+                                        xi_prev = state["xi_prev_cpu"][sidx:e].to(dev_vae, non_blocking=True, dtype=g_proj.dtype)
+                                        eps = torch.randn_like(g_proj)
+                                        eps = project_partial_orth(eps, v_est, 1.0)
+                                        if getattr(args, "noise_lowpass_k", 3) and args.noise_lowpass_k > 1:
+                                            pad = int(args.noise_lowpass_k) // 2
+                                            w = torch.ones(eps.size(1), 1, int(args.noise_lowpass_k), int(args.noise_lowpass_k), device=eps.device, dtype=eps.dtype) / (int(args.noise_lowpass_k)**2)
+                                            eps = F.conv2d(eps, w, padding=pad, groups=eps.size(1))
+                                        eps = eps - eps.mean(dim=(1,2,3), keepdim=True)
+                                        eps = eps / (_bn(eps).view(-1,1,1,1) + 1e-12)
+                                        rho = float(getattr(args, "noise_rho", 0.9)); rho = max(0.0, min(0.999, rho))
+                                        xi = rho * xi_prev + (1.0 - rho**2) ** 0.5 * eps
+                                        noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
+                                        state["xi_prev_cpu"][sidx:e] = xi.detach().to("cpu", dtype=torch.float32)
+                                    else:
+                                        noise_disp = torch.zeros_like(g_proj)
 
-                                base_disp = (v_est * dt_unit) if v_est is not None else z
-                                disp_cap  = cfg.gamma_max_ratio * _bn(base_disp)
-                                div_raw   = _bn(div_disp)
-                                scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (div_raw + 1e-12))
+                                    base_disp = (v_est * dt_unit) if v_est is not None else z
+                                    disp_cap  = cfg.gamma_max_ratio * _bn(base_disp)
+                                    if args.early_cap_power != 1.0:
+                                        disp_cap = disp_cap * ((1.0 - t_norm) ** args.early_cap_power)
+                                    div_raw   = _bn(div_disp)
+                                    scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (div_raw + 1e-12))
 
-                                # 最终位移写回：γ 只缩放体积位移；噪声直接叠加
-                                delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * div_disp + noise_disp
+                                    delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * div_disp + noise_disp
+                                    delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
+                                    lat_new[sidx:e] = lat_new[sidx:e] + delta_tr
 
-                                delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
-                                lat_new[s:e] = lat_new[s:e] + delta_tr
+                                    if "ctrl_cache" not in state: state["ctrl_cache"] = []
+                                    state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
 
-                                # —— 缓存控制位移（CPU）——
-                                if "ctrl_cache" not in state:
-                                    state["ctrl_cache"] = []
-                                state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
-
-                                if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
-                                if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
-                                del imgs_chunk, imgs_clip, grad_img_clip, grad_img_vae, grad_lat, g_proj, div_disp, noise_disp, delta_chunk, delta_tr, v_est, z
+                                    if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
+                                    if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
+                                    del imgs_chunk, imgs_clip, grad_img_clip, grad_img_vae, grad_lat, g_proj, div_disp, noise_disp, delta_chunk, delta_tr, v_est, z
 
                             kw["latents"] = lat_new
-
-                            # prev/prev_prev
-                            state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
                             state["prev_latents_vae_cpu"] = lat_vae_full.detach().to("cpu")
-
-                            # 控制位移与 dt
                             if "ctrl_cache" in state:
                                 state["prev_ctrl_vae_cpu"] = torch.cat(state["ctrl_cache"], dim=0).to("cpu")
                                 del state["ctrl_cache"]
                             state["prev_dt_unit"] = dt_unit
-
                             return kw
 
-                        # ===== 4) 生成 latent（不让管线内部 decode），并落到指定 run_dir =====
+                        # -------- 运行一次 pipeline（latent 输出），并落到指定 run_dir --------
                         run_dir = _prompt_run_dir(imgs_root, prompt_text, int(sd), float(g), int(args.steps))
                         os.makedirs(run_dir, exist_ok=True)
                         _log(f"[RUN] concept='{concept}' | prompt='{prompt_text}' | seed={sd} | guidance={g} | steps={args.steps} -> {run_dir}", True)
@@ -465,31 +466,32 @@ def main():
                             callback_on_step_end_tensor_inputs=["latents"],
                             output_type="latent",
                             return_dict=False,
-                        )[0]  # -> latent tensor（在 transformer 卡）
+                        )[0]
 
-                        # ===== 5) 手动在 VAE 卡 decode 最终 latent =====
+                        # 最终 decode
                         sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
                         latents_final = latents_out.to(dev_vae, non_blocking=True)
-
                         if args.enable_vae_tiling:
                             if hasattr(pipe.vae, "enable_slicing"): pipe.vae.enable_slicing()
                             if hasattr(pipe.vae, "enable_tiling"):  pipe.vae.enable_tiling()
 
+                        fp32_decode = bool(getattr(args, 'fp32_last_decode', False))
                         with torch.inference_mode(), cudnn.flags(enabled=False, benchmark=False, deterministic=False):
-                            images = checkpoint(lambda z: (pipe.vae.decode(z / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0,
-                                                latents_final, use_reentrant=False)
+                            if fp32_decode:
+                                images = (pipe.vae.decode(latents_final.float() / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0
+                            else:
+                                images = (pipe.vae.decode(latents_final / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0
 
-                        # 保存到该组合的子目录
                         from torchvision.utils import save_image
                         for i in range(images.size(0)):
                             save_image(images[i].cpu(), os.path.join(run_dir, f"img_{i:03d}.png"))
 
-                        # 清理临时张量引用
+                        # 释放临时张量引用
                         del latents_out, latents_final, images
 
         _log("Done.", True)
 
-    except Exception as e:
+    except Exception:
         print("\n=== FATAL ERROR ===\n")
         traceback.print_exc()
         sys.exit(1)

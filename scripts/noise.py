@@ -2,14 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-Diverse SD3.5 (no-embeds, TE=Transformer device, METHOD-CONSISTENT) [with A+B noise + init orthogonalization]
+Diverse SD3.5 (no-embeds, TE=Transformer device, METHOD-CONSISTENT)
+[with A+B noise + safe init-orthogonal injection]
 
 特点：
 - 单次生成：指定 prompt，G 张图，固定 guidance 与 steps（可改）
 - 回调：VAE 解码 -> CLIP 体积损失 -> VJP 回 latent -> 写回
 - 确定性项（体积漂移）仅受 gamma(t)（t_gate+sched_shape）调度
 - 噪声：SDE/Brownian 对齐 + 相对 SNR 目标（早强/晚强可配）
-- 批内初始 latent 正交化（i==0 时对 kw["latents"] 进行）
+- 第 0 步对 latent 混入批内正交噪声（可开关 + 强度可调，默认 blend）
 
 输出：
 - outputs/<method>_<prompt_slug>/{imgs,eval}/
@@ -120,7 +121,7 @@ def parse_args():
     # 生成参数
     ap.add_argument('--prompt', type=str, required=True)
     ap.add_argument('--negative', type=str, default='')
-    ap.add_argument('--G', type=int, default=64)  # 默认改为 64
+    ap.add_argument('--G', type=int, default=64)  # 默认 64
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
@@ -147,15 +148,22 @@ def parse_args():
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-3)
 
-    # 噪声时间形态（新增）：early=前期强，late=后期强
+    # 噪声时间形态：early=前期强，late=后期强
     ap.add_argument('--noise-timing', type=str, default='early', choices=['early', 'late'])
 
-    # -------- 新增（A+B）噪声控制参数 --------
-    ap.add_argument('--eta-sde', type=float, default=1.0, help='SDE/Brownian 噪声强度 (与 scheduler 对齐)')   # [A]
-    ap.add_argument('--rho0', type=float, default=0.25, help='相对 SNR 目标（早期）')                           # [B]
-    ap.add_argument('--rho1', type=float, default=0.05, help='相对 SNR 目标（末期）')                           # [B]
-    ap.add_argument('--noise-partial-ortho', type=float, default=1.0, help='噪声相对基流的正交比例')             # [B]
-    ap.add_argument('--vnorm-threshold', type=float, default=1e-4, help='基流范数过小则跳过噪声投影的阈值')        # [B]
+    # 噪声控制（A+B）
+    ap.add_argument('--eta-sde', type=float, default=1.0, help='SDE/Brownian 噪声强度 (与 scheduler 对齐)')
+    ap.add_argument('--rho0', type=float, default=0.25, help='相对 SNR 目标（早期）')
+    ap.add_argument('--rho1', type=float, default=0.05, help='相对 SNR 目标（末期）')
+    ap.add_argument('--noise-partial-ortho', type=float, default=1.0, help='噪声相对基流的正交比例')
+    ap.add_argument('--vnorm-threshold', type=float, default=1e-4, help='基流范数过小则跳过噪声投影的阈值')
+
+    # 安全的“初噪正交化”注入（默认 blend 混入）
+    ap.add_argument('--init-ortho', type=float, default=0.2,
+                    help='第0步向latent混入正交噪声的强度（0关闭，建议0.1~0.3）')
+    ap.add_argument('--init-ortho-mode', type=str, default='blend',
+                    choices=['blend','off','replace'],
+                    help='init-ortho 注入方式：blend=混入；replace=线性替换；off=关闭')
 
     # 设备
     ap.add_argument('--device-transformer', type=str, default='cuda:1')
@@ -320,19 +328,44 @@ def main():
             dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
             return float(dt_unit**0.5)
 
-        # === 批内初噪正交化（你的实现，原样并入） ===
-        def _batch_orthogonalize(x, eps: float = 1e-8):
-            # x: [B, C, H, W]
+        # ===== 初步：批内正交噪声生成 & 注入（安全版） =====
+        def _make_orthonormal_noise_like(x: torch.Tensor) -> torch.Tensor:
+            """
+            生成与 x 形状相同、批内正交的噪声基：
+            - 在 float32 上对随机矩阵做 QR（数值稳定）
+            - 再 reshape 回 [B, C, H, W]，并转回 x.dtype
+            """
             B = x.size(0)
-            y = x.view(B, -1)  # [B, M]
-            Q = torch.zeros_like(y)
-            for i in range(B):
-                v = y[i]
-                for j in range(i):
-                    v = v - (v @ Q[j]) * Q[j]
-                n = v.norm(p=2) + eps
-                Q[i] = v / n
-            return Q.view_as(x)
+            M = x[0].numel()
+            y = torch.randn(B, M, device=x.device, dtype=torch.float32)  # [B, M]
+            # 对 y^T 做 QR，得到 [M, B] 的 Q，再转回 [B, M]
+            Q, _ = torch.linalg.qr(y.t(), mode='reduced')  # [M, B]
+            Qb = Q.t().to(dtype=x.dtype).contiguous().view_as(x)  # [B, C, H, W]
+            return Qb
+
+        def _inject_init_ortho(latents: torch.Tensor, strength: float, mode: str = 'blend') -> torch.Tensor:
+            """
+            第0步向 latent 注入批内正交噪声：
+              - 生成批内正交基 U
+              - 按样本范数缩放：||U_i|| = ||latents_i||
+              - blend:  latents := latents + strength * U
+              - replace:latents := (1-strength)*latents + strength*U
+            """
+            if strength <= 0 or mode == 'off':
+                return latents
+
+            with torch.no_grad():
+                U = _make_orthonormal_noise_like(latents)
+                base_norm = (latents.flatten(1).norm(dim=1) + 1e-12)  # 每样本L2范数
+                U_norm = (U.flatten(1).norm(dim=1) + 1e-12)
+                U = U * (base_norm / U_norm).view(-1, 1, 1, 1)        # 重新匹配每样本范数
+
+                if mode == 'replace':
+                    out = (1.0 - strength) * latents + strength * U
+                else:  # blend
+                    out = latents + strength * U
+
+            return out
 
         # ===== 回调：一步步注入多样性 =====
         def diversity_callback(ppl, i, t, kw):
@@ -343,10 +376,13 @@ def main():
             t_norm = (t_cur - t_min) / (t_max - t_min + 1e-8)
             dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
 
-            # ---------- 批内初始 latent 正交化（只在第 0 步） ----------
+            # ---------- 第 0 步：安全混入批内正交噪声 ----------
             if i == 0 and "latents" in kw and kw["latents"] is not None:
-                with torch.no_grad():
-                    kw["latents"] = _batch_orthogonalize(kw["latents"])
+                kw["latents"] = _inject_init_ortho(
+                    kw["latents"],
+                    strength=float(getattr(args, "init_ortho", 0.0)),
+                    mode=str(getattr(args, "init_ortho_mode", "blend")),
+                )
 
             lat = kw.get("latents")
             if lat is None:

@@ -114,7 +114,6 @@ def _load_all(concept, methods, guidances, outputs_root, debug=False):
                  entropy_std =("entropy_std","mean")))
     return df
 
-# ================= Styles =================
 def _facet_bars(
     df, concept, methods, guidances,
     title=None,
@@ -122,7 +121,7 @@ def _facet_bars(
     annotate=True,
     annot_fmt="{:.3f}±{:.3f}",
     show_legend=True,
-    legend_loc="upper center",
+    legend_loc="upper center", # Note: This argument is now overridden for top-right placement
     annot_pad=0.02,
 ):
     methods_order   = [m for m in methods if m in set(df["method"])]
@@ -132,12 +131,13 @@ def _facet_bars(
     fig, axes = plt.subplots(1, n_g, figsize=(3.0*n_g + 1.8, 3.2), sharey=True)
     if n_g == 1: axes = [axes]
 
-    colors    = plt.get_cmap("tab10").colors
+    colors      = plt.get_cmap("tab10").colors
     color_map = {m: colors[i % len(colors)] for i, m in enumerate(methods_order)}
     legend_handles = [Patch(facecolor=color_map[m], edgecolor="none", label=m) for m in methods_order]
 
     global_top_needed = 0.0
 
+    # The main plotting loop remains the same
     for ax, g in zip(axes, guidances_order):
         xs, ys, es, cols = [], [], [], []
         x_centers = np.arange(len(methods_order), dtype=float)
@@ -157,24 +157,43 @@ def _facet_bars(
         if annotate and len(xs):
             for x, y, s in zip(xs, ys, es):
                 y_text = y + (s if show_error else 0.0) + annot_pad
-                ax.text(x, y_text, annot_fmt.format(y, s), ha="center", va="bottom", fontsize=9, clip_on=False)
+                ax.text(x, y_text, f"{y:.3f}", ha="center", va="bottom", fontsize=8, clip_on=False) # Simplified annotation
 
         ax.set_title(f"guidance={g:.1f}", fontsize=11)
         ax.set_xticks(x_centers)
-        ax.set_xticklabels(methods_order)
+        ax.set_xticklabels(methods_order, rotation=45, ha="right") # Rotated labels for readability
         ax.grid(axis="y", alpha=0.3, ls="--")
         ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
 
     y_top = max(1.08, global_top_needed + 0.01) if global_top_needed > 0 else 1.08
     for ax in axes: ax.set_ylim(0.0, min(1.12, y_top))
 
-    fig.supylabel("Normalized entropy (H / log K), ±1 SD")
-    fig.suptitle(title or f"Entropy by method under three guidances | concept={concept}", y=1.03, fontsize=12)
-    fig.tight_layout()
+    # CHANGED: Made y-axis label more descriptive
+    axes[0].set_ylabel("Normalized Entropy ($H/\\log K$)")
 
+    # === START OF KEY CHANGES ===
+
+    # CHANGED: A more descriptive, larger title
+    if title is None:
+        title = f"Normalized Entropy for the '{concept}' Concept"
+    fig.suptitle(title, y=1.05, fontsize=14)
+    
+    # CHANGED: Legend positioning and layout
     if show_legend and legend_handles:
-        fig.legend(handles=legend_handles, loc=legend_loc, frameon=False,
-                   ncol=min(4, len(legend_handles)), bbox_to_anchor=(0.5, 1.12))
+        fig.legend(
+            handles=legend_handles, 
+            loc='upper right',
+            bbox_to_anchor=(1.0, 1.0),   # Anchor to the top-right of the figure
+            ncol=2,                     # Arrange in 2 columns
+            frameon=False,
+            bbox_transform=fig.transFigure # Use figure coordinates
+        )
+
+    # === END OF KEY CHANGES ===
+    
+    # Adjust layout to make space for the legend on the right
+    fig.tight_layout(rect=[0, 0, 0.9, 1])
+    
     return fig
 
 def _heatmap(df, concept, methods, guidances, title=None, annotate=True, annot_fmt="{:.3f}±{:.3f}"):

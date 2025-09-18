@@ -127,36 +127,41 @@ def plot_cov_tau_panel(
     tau_min: float = 0.05,
     tau_max: float = 0.65,
     dense: int = 200,
-    legend_loc: str = "upper center",
+    # CHANGED: Default legend_loc is no longer used directly in fig.legend
+    legend_loc: str = "upper right",
     show_points: bool = True,
 ):
     outputs_root = Path(outputs_root)
 
-    # 颜色分配：按方法稳定映射
+    # Color mapping remains the same
     colors = plt.get_cmap("tab10").colors
     color_map = {m: colors[i % len(colors)] for i, m in enumerate(methods)}
 
     n = len(guidances)
-    # 关键：sharex=True（共享 x 轴）
     fig, axes = plt.subplots(1, n, figsize=(3.2 * n + 1.8, 3.2), sharey=True, sharex=True)
     if n == 1:
         axes = [axes]
-    mid_idx = n // 2  # 只在中间子图显示 x 轴名称
+    mid_idx = n // 2
 
     plotted_methods = set()
 
+    # The plotting loop for each panel remains the same
     for idx, (ax, g) in enumerate(zip(axes, guidances)):
-        df = _read_one_guidance_df(outputs_root, concept, methods, g)
+        try:
+            df = _read_one_guidance_df(outputs_root, concept, methods, g)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"[WARN] Skipping guidance {g}: {e}")
+            ax.set_title(f"guidance={float(g):.1f}\n(no data)", fontsize=11)
+            ax.set_xlim(tau_min, tau_max)
+            ax.set_ylim(0.0, 1.0)
+            ax.grid(True, alpha=0.3, ls="--")
+            continue
 
-        # 仅显示 [tau_min, tau_max] 区间
         df = df[(df["tau"] >= tau_min) & (df["tau"] <= tau_max)]
         x_dense = np.linspace(tau_min, tau_max, dense)
 
         if df.empty:
             ax.set_title(f"guidance={float(g):.1f}\n(no data)", fontsize=11)
-            ax.set_xlim(tau_min, tau_max)
-            ax.set_ylim(0.0, 1.0)
-            ax.grid(True, alpha=0.3, ls="--")
         else:
             for m in methods:
                 sub = df[df["method"] == m].sort_values("tau")
@@ -177,45 +182,57 @@ def plot_cov_tau_panel(
                     y_lo = np.clip(y_line - sd_line, 0.0, 1.0)
                     y_hi = np.clip(y_line + sd_line, 0.0, 1.0)
                     ax.fill_between(x_dense, y_lo, y_hi, color=color_map[m], alpha=0.15, lw=0)
-
+                
                 plotted_methods.add(m)
 
-            ax.set_xlim(tau_min, tau_max)
-            ax.set_ylim(0.0, 1.0)
-            ax.grid(True, alpha=0.3, ls="--")
-
+        ax.set_xlim(tau_min, tau_max)
+        ax.set_ylim(0.0, 1.0)
+        ax.grid(True, alpha=0.3, ls="--")
         ax.set_title(f"guidance={float(g):.1f}", fontsize=11)
 
         if idx == mid_idx:
-            ax.set_xlabel("tau")                    
-            ax.tick_params(axis="x", labelbottom=True, bottom=True)
+            ax.set_xlabel(r"threshold $\tau$") # Use LaTeX for tau symbol
         else:
-            ax.set_xlabel("")                        
-            ax.tick_params(axis="x", labelbottom=True, bottom=True)  
+            ax.set_xlabel("")
+        
+        # This part for tick labels can be simplified or kept as is
+        ax.tick_params(axis="x", labelbottom=True, bottom=True)
 
-    axes[0].set_ylabel("coverage")
+    axes[0].set_ylabel("Coverage")
 
     legend_methods = [m for m in methods if m in plotted_methods] or methods
 
-    anchor = (0.5, 1.12) if isinstance(legend_loc, str) and legend_loc.lower().startswith("upper") else (0.5, -0.02)
-
+    # === START OF KEY CHANGES ===
+    
+    # CHANGED: Legend positioning
+    # We now place the legend relative to the entire figure, not the axes.
+    # `bbox_to_anchor=(1.0, 1.0)` places the anchor point at the top-right corner of the figure.
+    # `loc='upper right'` tells the legend to align its own top-right corner to that anchor point.
     fig.legend(
         handles=[plt.Line2D([0], [0], color=color_map[m], lw=2.2) for m in legend_methods],
         labels=legend_methods,
-        loc=legend_loc,
-        ncol=min(3, len(legend_methods)),
+        loc='upper right',
+        bbox_to_anchor=(1.0, 1.0), # Anchor to the top-right of the figure
+        ncol=2,                    # CHANGED: Arrange in 2 columns
         frameon=False,
-        bbox_to_anchor=anchor
+        bbox_transform=fig.transFigure # Use figure coordinates
     )
 
+    # CHANGED: Title and font size
     if title is None:
-        title = f"Coverage–τ — concept={concept}"
-    fig.suptitle(title, y=1.02, fontsize=12)
-    fig.tight_layout()
+        # Use a more descriptive title with LaTeX formatting
+        title = f"Mode Coverage vs. Threshold ($\\tau$) for the '{concept}' Concept"
+    
+    # CHANGED: Increase title font size and adjust position slightly
+    fig.suptitle(title, y=1.05, fontsize=14)
+    
+    # === END OF KEY CHANGES ===
+
+    fig.tight_layout(rect=[0, 0, 0.9, 1]) # Adjust layout to make space for the legend on the right
 
     if save_path:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, dpi=600, bbox_inches="tight")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight") # Changed DPI for web/paper quality
         print(f"[SAVE] {save_path}")
         pdf = Path(save_path).with_suffix(".pdf")
         fig.savefig(pdf, bbox_inches="tight")

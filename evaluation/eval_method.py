@@ -961,7 +961,7 @@ def main():
                     help="Match pipeline CLIP image size (e.g., 224 or 336).")
 
     # 可选：自定义方法列表，默认只跑 dpp/pg/cads
-    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads"],
+    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads","noise"],
                     help="Methods to run (default: dpp pg cads). 'ours' will be ignored if included.")
 
     # === KID ===

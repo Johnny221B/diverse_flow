@@ -577,7 +577,7 @@ def _build_inception_extractor(device: torch.device):
 
 def _make_fid_transform():
     return T.Compose([
-        T.Resize(299, interpolation=T.InterpolationMode.BICUBIC, antialias=True),
+        T.Resize(299, interpolation=T.InterpolationMode.BILINEAR),
         T.CenterCrop(299),
         T.ToTensor(),
     ])

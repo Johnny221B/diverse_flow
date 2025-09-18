@@ -1,9 +1,23 @@
 {
-    "truck": [
-        "a photo of a truck",
-        "a truck",
-        "a cropped photo of a truck",
-        "a close-up photo of a truck",
-        "a photo of one truck"
+    "bicycle": [
+        "a photo of a bicycle",
+        "a bicycle",
+        "a cropped photo of a bicycle",
+        "a close-up photo of a bicycle",
+        "a photo of one bicycle"
+    ],
+    "dog": [
+        "a photo of a dog",
+        "a dog",
+        "a cropped photo of a dog",
+        "a close-up photo of a dog",
+        "a photo of one dog"
+    ],
+    "bus": [
+        "a photo of a bus",
+        "a bus",
+        "a cropped photo of a bus",
+        "a close-up photo of a bus",
+        "a photo of one bus"
     ]
 }

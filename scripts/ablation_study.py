@@ -143,7 +143,7 @@ def parse_args():
     ap.add_argument('--gamma0', type=float, default=0.12)
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)
     ap.add_argument('--partial-ortho', type=float, default=1.0)
-    ap.add_argument('--t-gate', type=str, default='0.70,0.99')
+    ap.add_argument('--t-gate', type=str, default='0.80,0.99')
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-3)

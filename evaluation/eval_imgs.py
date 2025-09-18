@@ -5,10 +5,11 @@ Unified Image Evaluation Tool
 - For each generated folder, compute:
   * Vendi Score (pixel & inception embedding)
   * FID (against a shared real/reference folder)
+  * KID (Kernel Inception Distance; unbiased MMD^2 with cubic polynomial kernel)
   * CLIP Score (using local OpenAI CLIP JIT; no model fallback)
   * 1 - MS-SSIM (diversity)
   * BRISQUE (quality)
-- Reuses: one InceptionV3 (for FID) and cached features of the real set across all folders.
+- Reuses: one InceptionV3 (for FID/KID) and cached features of the real set across all folders.
 
 Dependencies:
   torch, torchvision, PIL, numpy, tqdm, skimage, opencv-python
@@ -21,7 +22,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 import torch
 import torch.nn as nn
@@ -80,21 +81,14 @@ def _save_per_folder_json(
     Save per-folder JSON to:  <base>/<eval_dir_name>/<name>.json
     - base = the directory before the first 'imgs' in gen_dir
     - name = the immediate child right after 'imgs'
-    Examples:
-      /exp/imgs/abc          -> /exp/eval/abc.json
-      /root/run1/imgs/mA     -> /root/run1/eval/mA.json
-      /exp/imgs              -> /exp/eval/imgs.json   (no child after 'imgs')
-    If 'imgs' is not present, fallback to: gen_dir.parent/<eval_dir_name>/<gen_dir.name>.json
     """
     parts = gen_dir.parts
     if "imgs" in parts:
         idx = parts.index("imgs")
         base = Path(*parts[:idx]) if idx > 0 else Path(".")
         eval_dir = base / eval_dir_name
-        # 用 'imgs' 的“直接子目录名”作为文件名；若没有子目录，则用当前文件夹名
         fname_stem = parts[idx + 1] if len(parts) > idx + 1 else gen_dir.name
     else:
-        # 没有 'imgs' 字段时的兜底策略
         eval_dir = gen_dir.parent / eval_dir_name
         fname_stem = gen_dir.name
 
@@ -147,11 +141,11 @@ def compute_vendi_for_images(imgs: List[Image.Image], device: str = "cuda") -> D
     return {"vendi_pixel": pix_vs, "vendi_inception": emb_vs}
 
 # -------------------------------
-# FID utilities (shared Inception & reference features)
+# Inception features (for FID & KID)
 # -------------------------------
 def _build_inception_extractor(device: torch.device):
     if piq is None or InceptionV3 is None:
-        print("Warning: piq not installed; FID will be skipped.")
+        print("Warning: piq not installed; FID/KID will be skipped.")
         return None
     return InceptionV3().to(device)
 
@@ -163,7 +157,7 @@ def _extract_inception_features(
     batch_size: int = 32,
 ) -> torch.Tensor:
     transform = T.Compose([
-        T.Resize(299),
+        T.Resize(299, interpolation=T.InterpolationMode.BICUBIC),
         T.CenterCrop(299),
         T.ToTensor(),
     ])
@@ -207,6 +201,72 @@ def compute_fid_from_features(real_features: torch.Tensor, fake_features: torch.
     return float(value)
 
 # -------------------------------
+# === KID (Kernel Inception Distance) ===
+# -------------------------------
+def _poly_kernel(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Polynomial kernel k(x,y) = (x^T y / d + 1)^3  where d = feature_dim.
+    x: [m, d], y: [n, d] -> returns [m, n]
+    """
+    d = x.shape[1]
+    return (x @ y.T / float(d) + 1.0) ** 3
+
+def compute_kid_from_features(
+    real_features: torch.Tensor,
+    fake_features: torch.Tensor,
+    subset_size: int = 1000,
+    n_subsets: int = 10,
+    rng: Optional[np.random.Generator] = None,
+) -> Optional[Tuple[float, float]]:
+    """
+    Unbiased KID estimate (mean ± std over subsets) using polynomial kernel of degree 3.
+    Returns (kid_mean, kid_std) or None if inputs are invalid.
+    """
+    if real_features is None or fake_features is None: return None
+    if real_features.numel() == 0 or fake_features.numel() == 0: return None
+    if real_features.shape[1] != fake_features.shape[1]:
+        print("KID: feature dim mismatch.")
+        return None
+
+    m_full, n_full = real_features.shape[0], fake_features.shape[0]
+    if m_full < 2 or n_full < 2:
+        return None
+
+    s = min(subset_size, m_full, n_full)
+    if s < 2:
+        return None
+
+    if rng is None:
+        rng = np.random.default_rng(0)
+
+    X = real_features.to(torch.float64)
+    Y = fake_features.to(torch.float64)
+    stats = []
+
+    for _ in range(max(1, n_subsets)):
+        ridx = rng.choice(m_full, size=s, replace=False)
+        fidx = rng.choice(n_full, size=s, replace=False)
+        xs = X[ridx]  # [s,d]
+        ys = Y[fidx]  # [s,d]
+
+        k_xx = _poly_kernel(xs, xs)
+        k_yy = _poly_kernel(ys, ys)
+        k_xy = _poly_kernel(xs, ys)
+
+        # Unbiased MMD^2 estimator
+        sum_xx = (k_xx.sum() - k_xx.diag().sum()) / (s * (s - 1))
+        sum_yy = (k_yy.sum() - k_yy.diag().sum()) / (s * (s - 1))
+        sum_xy = k_xy.mean()
+
+        mmd2 = sum_xx + sum_yy - 2.0 * sum_xy
+        stats.append(float(mmd2.item()))
+
+    stats = np.array(stats, dtype=np.float64)
+    kid_mean = float(stats.mean())
+    kid_std  = float(stats.std(ddof=1)) if stats.size > 1 else 0.0
+    return kid_mean, kid_std
+
+# -------------------------------
 # CLIP score (use same OpenAI JIT as pipeline; no model fallback)
 # -------------------------------
 def load_clip_from_jit(jit_path: Path):
@@ -224,11 +284,7 @@ def calculate_clip_score(
     clip_image_size: int = 224,            # align with pipeline cfg.clip_image_size
 ) -> Optional[float]:
     """
-    Compute CLIPScore using the SAME image preprocessing as the pipeline (CLIPWrapper):
-      - convert to tensor in [0,1]
-      - bilinear interpolate to (S,S) with antialias=True (no aspect-ratio keep, no center-crop)
-      - normalize with OpenAI CLIP mean/std
-    Uses the text encoder from the provided OpenAI CLIP JIT model.
+    Compute CLIPScore using the SAME image preprocessing as the pipeline (CLIPWrapper).
     """
     prompt = image_folder.name.replace('_', ' ').replace('-', ' ')
 
@@ -276,18 +332,15 @@ def calculate_clip_score(
                 continue
 
             x = torch.stack(imgs, dim=0).to(device=device, dtype=torch.float32)  # [B,3,H,W]
-
             if x.shape[-2:] != (clip_image_size, clip_image_size):
                 x = F.interpolate(
                     x, size=(clip_image_size, clip_image_size),
                     mode="bilinear", align_corners=False, antialias=True
                 )
-
             x = (x - mean) / std
 
             image_features = model.encode_image(x)
             image_features = image_features / (image_features.norm(dim=-1, keepdim=True) + 1e-12)
-
             sim = (100.0 * (image_features @ text_features.T)).squeeze(-1).detach().cpu().tolist()
             all_scores.extend(sim)
 
@@ -301,12 +354,10 @@ def calculate_ms_ssim_diversity(image_folder: Path, max_pairs: int = 100) -> Opt
     if len(paths) < 2:
         return None
 
-    # 随机子采样，限制两两对数量
     rng = np.random.default_rng(0)
     if len(paths) > int(np.sqrt(max_pairs * 2)) + 1 and max_pairs > 0:
         paths = rng.choice(paths, size=int(np.sqrt(max_pairs * 2)) + 1, replace=False)
 
-    # 枚举组合并再子采样
     pairs = [(paths[i], paths[j]) for i in range(len(paths)) for j in range(i+1, len(paths))]
     if len(pairs) > max_pairs and max_pairs > 0:
         idx = rng.choice(len(pairs), size=max_pairs, replace=False)
@@ -379,7 +430,7 @@ def _nan_to_none(obj):
 def main():
     ap = argparse.ArgumentParser(description="Unified evaluator for multiple generated folders against a shared real/reference set.")
     ap.add_argument("--gen", nargs="+", required=True, help="One or more generated image folders.")
-    ap.add_argument("--real", required=True, help="Reference (real) image folder for FID.")
+    ap.add_argument("--real", required=True, help="Reference (real) image folder for FID/KID.")
     ap.add_argument("--out", required=True, help="Output JSON path for results.")
 
     ap.add_argument("--device", type=str, default="cuda:0", help='Device, e.g., "cpu", "cuda", "cuda:0"')
@@ -389,6 +440,10 @@ def main():
     ap.add_argument("--clip-image-size", type=int, default=224, help="Match pipeline CLIP image size (e.g., 224 or 336).")
     ap.add_argument("--max-pairs", type=int, default=100, help="Max pairs for MS-SSIM diversity (controls cost).")
     ap.add_argument("--eval_dir_name", type=str, default="eval")
+
+    # === KID ===
+    ap.add_argument("--kid-subset-size", type=int, default=64, help="Subset size per KID estimate (min(#real,#fake,#this)).")
+    ap.add_argument("--kid-subsets", type=int, default=20, help="Number of random subsets for KID (0 to disable).")
 
     args = ap.parse_args()
 
@@ -408,10 +463,10 @@ def main():
         raise SystemExit(f"Real folder not found or not dir: {real_dir}")
 
     # --- Build shared tools/models ---
-    # Inception for FID
+    # Inception for FID/KID
     inception = _build_inception_extractor(device)
 
-    # Precompute real features once (for FID)
+    # Precompute real features once (for FID/KID)
     real_features = None
     if inception is not None:
         real_paths = list_images(real_dir)
@@ -420,7 +475,7 @@ def main():
                 real_paths, inception, device, num_workers=args.num_workers, batch_size=args.batch_size
             )
         else:
-            print("No real images found; FID will be skipped.")
+            print("No real images found; FID/KID will be skipped.")
             inception = None
 
     # CLIP: use the SAME OpenAI JIT as pipeline; no model fallback
@@ -457,13 +512,27 @@ def main():
             continue
         vendi_scores = compute_vendi_for_images(imgs, device=str(device))
 
-        # FID for this folder
+        # FID/KID features for this folder
         fid_value = None
+        kid_mean, kid_std = None, None
+        fake_features = None
         if inception is not None and real_features is not None and real_features.numel() > 0:
             fake_features = _extract_inception_features(
                 paths, inception, device, num_workers=args.num_workers, batch_size=args.batch_size
             )
+            # FID
             fid_value = compute_fid_from_features(real_features, fake_features)
+            # KID (only if enabled)
+            if args.kid_subsets > 0 and fake_features is not None and fake_features.numel() > 0:
+                rng = np.random.default_rng(abs(hash(gen_dir.name)) % (2**32))
+                kid_ret = compute_kid_from_features(
+                    real_features, fake_features,
+                    subset_size=args.kid_subset_size,
+                    n_subsets=args.kid_subsets,
+                    rng=rng
+                )
+                if kid_ret is not None:
+                    kid_mean, kid_std = kid_ret
 
         # CLIP Score (only if JIT available)
         clip_score = None
@@ -485,6 +554,9 @@ def main():
             "vendi_pixel": vendi_scores.get("vendi_pixel"),
             "vendi_inception": vendi_scores.get("vendi_inception"),
             "fid": fid_value,
+            # === KID ===
+            "kid_mean": kid_mean,
+            "kid_std": kid_std,
             "clip_score": clip_score,
             "one_minus_ms_ssim": msssim_div,
             "brisque": brisque_quality,
@@ -505,10 +577,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# python eval_imgs.py \
-#   --gen /path/to/outputs/ourMethod_xxx/imgs \
-#   --real /path/to/real_dataset \
-#   --out  /path/to/outputs/ourMethod_xxx/eval_summary.json \
-#   --clip-jit ~/.cache/clip/ViT-B-32.pt \
-#   --clip-image-size 224

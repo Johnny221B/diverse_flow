@@ -1,4 +1,3 @@
-# #!/usr/bin/env python3
 # # -*- coding: utf-8 -*-
 # """
 # Batch CSV evaluator by concept for methods: dpp, pg, cads (exclude ours).
@@ -7,12 +6,13 @@
 #     --outputs-root /mnt/data6t/yyz/flow_grpo/flow_base/outputs \
 #     --concept truck \
 #     --real-root /mnt/data6t/yyz/flow_grpo/flow_base/real_cls_crops \
-#     --fid-mode both --match-real-count --max-pairs 200
+#     --fid-mode both --match-real-count --max-pairs 200 \
+#     --clip-jit ~/.cache/clip/ViT-B-32.pt --clip-image-size 224
 # """
 
 # import argparse, os, re
 # from pathlib import Path
-# from typing import Dict, List, Optional, Any, Tuple
+# from typing import Dict, List, Optional, Any
 # import csv
 # import numpy as np
 # from PIL import Image
@@ -31,6 +31,7 @@
 #     piq = None
 #     InceptionV3 = None
 
+# # only for tokenization fallback (model not used)
 # try:
 #     import open_clip
 # except ImportError:
@@ -150,85 +151,81 @@
 #         print(f"clean-fid failed on {gen_dir}: {e}")
 #         return None
 
-# # --------- CLIP cosine ----------
-# def load_clip_from_jit(jit_path: Path):
+# # --------- CLIP cosine (JIT only, preprocess aligned to pipeline) ----------
+# def load_clip_from_jit(jit_path: Path, image_size: int = 224):
+#     """
+#     Load OpenAI CLIP JIT and return (model, preprocess) where preprocess matches pipeline:
+#       - Resize((S,S), bicubic, antialias=True), no aspect ratio keep, no center crop
+#       - ToTensor + OpenAI mean/std
+#     """
 #     model = torch.jit.load(str(jit_path), map_location="cpu").eval()
 #     preprocess = T.Compose([
-#         T.Resize(224, interpolation=T.InterpolationMode.BICUBIC),
-#         T.CenterCrop(224),
+#         T.Resize((image_size, image_size), interpolation=T.InterpolationMode.BICUBIC, antialias=True),
 #         T.ToTensor(),
 #         T.Normalize((0.48145466, 0.4578275, 0.40821073),
 #                     (0.26862954, 0.26130258, 0.27577711)),
 #     ])
 #     return model, preprocess
 
-# def load_clip_fallback_openclip(device: torch.device):
-#     if open_clip is None: return None, None, None
-#     model, _, preprocess = open_clip.create_model_and_transforms("ViT-B-32", pretrained="laion2b_s34b_b79k", device=device)
-#     tok = open_clip.get_tokenizer("ViT-B-32")
-#     model.eval()
-#     return model, preprocess, tok
-
-# def calculate_clip_cosine(folder: Path, model, preprocess, device, batch_size, text=None, tokenizer=None, is_openclip=False):
+# def calculate_clip_cosine(folder: Path, model, preprocess, device, batch_size,
+#                           text: Optional[str] = None, tokenizer=None):
+#     """
+#     Compute CLIP cosine using the SAME preprocessing as pipeline (passed in via preprocess).
+#     Model is the OpenAI CLIP JIT. No model fallback.
+#     """
 #     image_paths = list(folder.rglob("*.jpg")) + list(folder.rglob("*.png"))
-#     if not image_paths: return None
+#     if not image_paths:
+#         return None
+
+#     # prompt
 #     prompt = text
 #     if prompt is None:
 #         meta = parse_meta_from_name(folder.name)
 #         prompt = meta.get("prompt") or folder.name.replace("_"," ").replace("-"," ")
+
+#     # tokenizer: prefer open_clip.tokenize, fallback to openai-clip's clip.tokenize
+#     if tokenizer is None:
+#         tok = None
+#         try:
+#             import open_clip as _oc
+#             tok = _oc.tokenize
+#         except Exception:
+#             try:
+#                 import clip as openai_clip
+#                 tok = openai_clip.tokenize
+#             except Exception:
+#                 tok = None
+#         tokenizer = tok
+
+#     if tokenizer is None:
+#         print("No tokenizer available (open_clip or clip). Skip CLIP cosine.")
+#         return None
+
 #     with torch.inference_mode():
-#         if is_openclip:
-#             t = tokenizer([prompt]).to(device)
-#             tfeat = model.encode_text(t)
-#         else:
-#             if open_clip is None:
-#                 print("open_clip not installed; skip CLIP cosine.")
-#                 return None
-#             t = open_clip.tokenize([prompt]).to(device)
-#             tfeat = model.encode_text(t)
-#         tfeat = tfeat / tfeat.norm(dim=-1, keepdim=True)
+#         t = tokenizer([prompt]).to(device)
+#         tfeat = model.encode_text(t)
+#         tfeat = tfeat / (tfeat.norm(dim=-1, keepdim=True) + 1e-12)
+
 #         sims = []
-#         for i in tqdm(range(0,len(image_paths),batch_size), desc=f"CLIP cosine: {folder.name}"):
-#             ims = [preprocess(Image.open(p).convert("RGB")) for p in image_paths[i:i+batch_size]]
-#             x = torch.stack(ims).to(device)
-#             if hasattr(model, "encode_image"):
-#                 if not is_openclip and not hasattr(model, "encode_image"):
-#                     print("Model has no encode_image; skip CLIP cosine.")
-#                     return None
-#             if is_openclip:
-#                 if hasattr(model, "encode_image"):
-#                     if hasattr(model, "visual") and hasattr(model.visual, "forward"):
-#                         pass
-#                 if hasattr(model, "encode_image"):
-#                     pass
-#             if hasattr(model, "encode_image"):
-#                 if is_openclip:
-#                     if hasattr(model, "encode_image"):
-#                         if x.dtype != torch.float32: x = x.float()
-#                 if hasattr(model, "encode_image"):
-#                     if is_openclip:
-#                         pass
-#             if hasattr(model, "encode_image"):
-#                 if is_openclip:
-#                     pass
-#             if hasattr(model, "encode_image"):
-#                 if is_openclip:
-#                     pass
-#             # 简化调用
-#             if hasattr(model, "encode_image"):
-#                 if x.dtype != torch.float32: x = x.float()
-#                 if next(model.parameters()).dtype == torch.float16:
-#                     x = x.half()
-#                 if next(model.parameters()).dtype == torch.bfloat16:
-#                     x = x.bfloat16()
-#                 if next(model.parameters()).is_cuda and not x.is_cuda:
-#                     x = x.to(device)
-#                 if not next(model.parameters()).is_cuda and x.is_cuda:
-#                     x = x.to("cpu")
+#         for i in tqdm(range(0, len(image_paths), batch_size), desc=f"CLIP cosine: {folder.name}"):
+#             ims = []
+#             for p in image_paths[i:i+batch_size]:
+#                 try:
+#                     ims.append(preprocess(Image.open(p).convert("RGB")))
+#                 except Exception:
+#                     continue
+#             if not ims:
+#                 continue
+#             x = torch.stack(ims).to(device=device, dtype=torch.float32)  # [B,3,S,S]
+#             # JIT encode_image
+#             if not hasattr(model, "encode_image"):
+#                 print("JIT model has no encode_image; skip.")
+#                 return None
 #             feat = model.encode_image(x)
-#             feat = feat / feat.norm(dim=-1, keepdim=True)
+#             feat = feat / (feat.norm(dim=-1, keepdim=True) + 1e-12)
 #             sim = (100.0 * feat @ tfeat.T).squeeze(-1).detach().cpu().numpy()
 #             sims.extend(sim.tolist())
+
 #     return float(np.mean(sims)) if sims else None
 
 # # --------- MS-SSIM (multi-scale) ----------
@@ -292,7 +289,7 @@
 # def evaluate_one(gen_root: Path, method: str, concept: str, real_dir: Path,
 #                  device: torch.device, fid_mode: str, match_real_count: bool,
 #                  batch_size: int, num_workers: int, max_pairs: int,
-#                  clip_model, clip_preproc, openclip_tokenizer, clip_is_openclip: bool,
+#                  clip_model, clip_preproc,
 #                  inception, real_features):
 #     if not gen_root.exists() or not gen_root.is_dir():
 #         print(f"[skip] {gen_root} not found.")
@@ -321,7 +318,7 @@
 #             print(f"\n=== {method}/{concept}: {gen_dir.name} ===")
 #             paths = list_images(gen_dir)
 #             if not paths:
-#                 print("  no images, skip.");
+#                 print("  no images, skip.")
 #                 continue
 
 #             meta = parse_meta_from_name(gen_dir.name)
@@ -352,13 +349,13 @@
 #             if fid_mode in ("clean","both"):
 #                 fid_clean = compute_fid_cleanfid(real_dir, gen_dir, mode="clean")
 
-#             # CLIP cosine
+#             # CLIP cosine (JIT only)
 #             clip_cos = None
-#             if clip_model is not None and clip_preproc is not None:
+#             if (clip_model is not None) and (clip_preproc is not None):
 #                 clip_text = meta.get("prompt")
 #                 clip_cos = calculate_clip_cosine(
 #                     gen_dir, clip_model, clip_preproc, device, batch_size,
-#                     text=clip_text, tokenizer=openclip_tokenizer, is_openclip=clip_is_openclip
+#                     text=clip_text, tokenizer=None  # tokenizer will be resolved inside
 #                 )
 
 #             # MS-SSIM diversity
@@ -401,9 +398,11 @@
 #     ap.add_argument("--match-real-count", action="store_true")
 
 #     ap.add_argument("--clip-jit", type=str, default=os.path.expanduser("~/.cache/clip/ViT-B-32.pt"))
+#     ap.add_argument("--clip-image-size", type=int, default=224,
+#                     help="Match pipeline CLIP image size (e.g., 224 or 336).")
 
 #     # 可选：自定义方法列表，默认只跑 dpp/pg/cads
-#     ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads"],
+#     ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads","ourmethod"],
 #                     help="Methods to run (default: dpp pg cads). 'ours' will be ignored if included.")
 
 #     args = ap.parse_args()
@@ -432,24 +431,19 @@
 #             print("No real images found; FID(piq) will be skipped.")
 #             inception = None
 
-#     # CLIP setup
-#     clip_model = None; clip_preproc = None; openclip_tokenizer = None; clip_is_openclip = False
+#     # CLIP setup: use OpenAI JIT only (no model fallback)
+#     clip_model = None
+#     clip_preproc = None
 #     jit_path = Path(args.clip_jit) if args.clip_jit else None
 #     if jit_path and jit_path.exists():
 #         try:
-#             clip_model, clip_preproc = load_clip_from_jit(jit_path)
+#             clip_model, clip_preproc = load_clip_from_jit(jit_path, image_size=args.clip_image_size)
 #             clip_model = clip_model.to(device)
-#             print(f"Loaded CLIP JIT from {jit_path}")
+#             print(f"Loaded CLIP JIT from {jit_path} (image_size={args.clip_image_size})")
 #         except Exception as e:
-#             print(f"Failed to load CLIP JIT: {e}. Trying open_clip fallback...")
-#     if clip_model is None:
-#         model, preproc, tok = load_clip_fallback_openclip(device)
-#         if model is not None:
-#             clip_model, clip_preproc, openclip_tokenizer = model, preproc, tok
-#             clip_is_openclip = True
-#             print("Loaded CLIP via open_clip fallback.")
-#         else:
-#             print("No CLIP available; CLIP cosine will be skipped.")
+#             print(f"Failed to load CLIP JIT: {e}")
+#     else:
+#         print(f"CLIP JIT not found at {jit_path}; CLIP cosine will be skipped.")
 
 #     # Run each method (skip 'ours' explicitly)
 #     for method in args.methods:
@@ -462,7 +456,6 @@
 #             device=device, fid_mode=args.fid_mode, match_real_count=args.match_real_count,
 #             batch_size=args.batch_size, num_workers=args.num_workers, max_pairs=args.max_pairs,
 #             clip_model=clip_model, clip_preproc=clip_preproc,
-#             openclip_tokenizer=openclip_tokenizer, clip_is_openclip=clip_is_openclip,
 #             inception=inception, real_features=real_features
 #         )
 
@@ -472,18 +465,20 @@
 # -*- coding: utf-8 -*-
 """
 Batch CSV evaluator by concept for methods: dpp, pg, cads (exclude ours).
+Now with KID (Kernel Inception Distance).
 Usage example:
   python eval_by_concept.py \
     --outputs-root /mnt/data6t/yyz/flow_grpo/flow_base/outputs \
     --concept truck \
     --real-root /mnt/data6t/yyz/flow_grpo/flow_base/real_cls_crops \
     --fid-mode both --match-real-count --max-pairs 200 \
-    --clip-jit ~/.cache/clip/ViT-B-32.pt --clip-image-size 224
+    --clip-jit ~/.cache/clip/ViT-B-32.pt --clip-image-size 224 \
+    --kid-subset-size 1000 --kid-subsets 10
 """
 
 import argparse, os, re
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import csv
 import numpy as np
 from PIL import Image
@@ -573,10 +568,10 @@ def compute_vendi_for_images(imgs: List[Image.Image], device: str = "cuda") -> D
             raise
     return {"vendi_pixel": pix_vs, "vendi_inception": emb_vs}
 
-# --------- FID ----------
+# --------- Inception features (for FID & KID) ----------
 def _build_inception_extractor(device: torch.device):
     if piq is None or InceptionV3 is None:
-        print("Warning: piq not installed; FID(piq) will be skipped.")
+        print("Warning: piq not installed; FID(piq)/KID using piq features will be skipped.")
         return None
     return InceptionV3().to(device)
 
@@ -608,6 +603,7 @@ def _extract_inception_features(paths: List[Path], extractor: nn.Module, device:
             feats_all.append(feats.cpu())
     return torch.cat(feats_all, dim=0) if feats_all else torch.empty(0, 2048)
 
+# --------- FID ----------
 def compute_fid_from_features(real_features: torch.Tensor, fake_features: torch.Tensor) -> Optional[float]:
     if piq is None or real_features.numel()==0 or fake_features.numel()==0: return None
     return float(piq.FID()(real_features, fake_features))
@@ -621,6 +617,75 @@ def compute_fid_cleanfid(real_dir: Path, gen_dir: Path, mode="clean") -> Optiona
     except Exception as e:
         print(f"clean-fid failed on {gen_dir}: {e}")
         return None
+
+# --------- KID (Kernel Inception Distance) ----------
+# === KID ===
+def _poly_kernel(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Polynomial kernel k(x,y) = (x^T y / d + 1)^3  where d=feature_dim.
+    x: [m, d], y: [n, d]
+    returns: [m, n]
+    """
+    d = x.shape[1]
+    return (x @ y.T / float(d) + 1.0) ** 3
+
+# === KID ===
+def compute_kid_from_features(
+    real_features: torch.Tensor,
+    fake_features: torch.Tensor,
+    subset_size: int = 1000,
+    n_subsets: int = 10,
+    rng: Optional[np.random.Generator] = None,
+) -> Optional[Tuple[float, float]]:
+    """
+    Unbiased KID estimate (mean ± std over subsets) using polynomial kernel of degree 3.
+    Returns (kid_mean, kid_std) or None if inputs are invalid.
+    """
+    if real_features is None or fake_features is None: return None
+    if real_features.numel()==0 or fake_features.numel()==0: return None
+    if real_features.shape[1] != fake_features.shape[1]:
+        print("KID: feature dim mismatch.")
+        return None
+
+    m_full, n_full = real_features.shape[0], fake_features.shape[0]
+    if m_full < 2 or n_full < 2:
+        return None
+
+    subset = min(subset_size, m_full, n_full)
+    if subset < 2:
+        return None
+
+    if rng is None:
+        rng = np.random.default_rng(0)
+
+    # Work on float64 for numerics (optional)
+    X = real_features.to(torch.float64)
+    Y = fake_features.to(torch.float64)
+    stats = []
+
+    for _ in range(max(1, n_subsets)):
+        ridx = rng.choice(m_full, size=subset, replace=False)
+        fidx = rng.choice(n_full, size=subset, replace=False)
+        xs = X[ridx]  # [s,d]
+        ys = Y[fidx]  # [s,d]
+
+        k_xx = _poly_kernel(xs, xs)
+        k_yy = _poly_kernel(ys, ys)
+        k_xy = _poly_kernel(xs, ys)
+
+        m = k_xx.shape[0]
+        n = k_yy.shape[0]
+
+        # Unbiased MMD^2 estimator
+        sum_xx = (k_xx.sum() - k_xx.diag().sum()) / (m * (m - 1))
+        sum_yy = (k_yy.sum() - k_yy.diag().sum()) / (n * (n - 1))
+        sum_xy = k_xy.mean()
+
+        mmd2 = sum_xx + sum_yy - 2.0 * sum_xy
+        stats.append(float(mmd2.item()))
+
+    stats = np.array(stats, dtype=np.float64)
+    return float(stats.mean()), float(stats.std(ddof=1)) if stats.size > 1 else 0.0
 
 # --------- CLIP cosine (JIT only, preprocess aligned to pipeline) ----------
 def load_clip_from_jit(jit_path: Path, image_size: int = 224):
@@ -761,7 +826,8 @@ def evaluate_one(gen_root: Path, method: str, concept: str, real_dir: Path,
                  device: torch.device, fid_mode: str, match_real_count: bool,
                  batch_size: int, num_workers: int, max_pairs: int,
                  clip_model, clip_preproc,
-                 inception, real_features):
+                 inception, real_features,
+                 kid_subset_size: int, kid_subsets: int):
     if not gen_root.exists() or not gen_root.is_dir():
         print(f"[skip] {gen_root} not found.")
         return
@@ -779,6 +845,8 @@ def evaluate_one(gen_root: Path, method: str, concept: str, real_dir: Path,
         "method","concept","folder","prompt","seed","guidance","steps","num_images",
         "vendi_pixel","vendi_inception",
         "fid","fid_clean",
+        # === KID ===
+        "kid_mean","kid_std",
         "clip_score","one_minus_ms_ssim","brisque"
     ]
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -804,21 +872,38 @@ def evaluate_one(gen_root: Path, method: str, concept: str, real_dir: Path,
                 continue
             vendi_scores = compute_vendi_for_images(imgs, device=str(device))
 
+            # Features for FID/KID (extract once if inception available)
+            fake_feats = torch.empty(0)
+            if inception is not None:
+                fake_feats = _extract_inception_features(paths, inception, device,
+                                                         num_workers=num_workers, batch_size=batch_size)
+
             # FID (piq)
             fid_value = None
             if fid_mode in ("piq","both") and (inception is not None) and (real_features is not None) and (real_features.numel()>0):
-                fake_feats = _extract_inception_features(paths, inception, device, num_workers=num_workers, batch_size=batch_size)
                 real_feats_used = real_features
-                if match_real_count and real_features.shape[0] >= fake_feats.shape[0] and fake_feats.shape[0] > 0:
+                if match_real_count and fake_feats.numel() > 0 and real_features.shape[0] >= fake_feats.shape[0]:
                     rng = np.random.default_rng(abs(hash(gen_dir.name)) % (2**32))
                     idx = rng.choice(real_features.shape[0], size=fake_feats.shape[0], replace=False)
                     real_feats_used = real_features[idx]
-                fid_value = compute_fid_from_features(real_feats_used, fake_feats)
+                if fake_feats.numel() > 0:
+                    fid_value = compute_fid_from_features(real_feats_used, fake_feats)
 
             # FID (clean-fid)
             fid_clean = None
             if fid_mode in ("clean","both"):
                 fid_clean = compute_fid_cleanfid(real_dir, gen_dir, mode="clean")
+
+            # === KID ===
+            kid_mean, kid_std = None, None
+            if (kid_subsets > 0) and (inception is not None) and (real_features is not None) and (fake_feats.numel() > 0):
+                rng = np.random.default_rng(abs(hash(gen_dir.name)) % (2**32))
+                kid_ret = compute_kid_from_features(real_features, fake_feats,
+                                                    subset_size=kid_subset_size,
+                                                    n_subsets=kid_subsets,
+                                                    rng=rng)
+                if kid_ret is not None:
+                    kid_mean, kid_std = kid_ret
 
             # CLIP cosine (JIT only)
             clip_cos = None
@@ -848,6 +933,9 @@ def evaluate_one(gen_root: Path, method: str, concept: str, real_dir: Path,
                 "vendi_inception": vendi_scores.get("vendi_inception"),
                 "fid": fid_value,
                 "fid_clean": fid_clean,
+                # === KID ===
+                "kid_mean": kid_mean,
+                "kid_std": kid_std,
                 "clip_score": clip_cos,
                 "one_minus_ms_ssim": msssim_div,
                 "brisque": brisque_quality,
@@ -873,8 +961,14 @@ def main():
                     help="Match pipeline CLIP image size (e.g., 224 or 336).")
 
     # 可选：自定义方法列表，默认只跑 dpp/pg/cads
-    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads","ourmethod"],
+    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads"],
                     help="Methods to run (default: dpp pg cads). 'ours' will be ignored if included.")
+
+    # === KID ===
+    ap.add_argument("--kid-subset-size", type=int, default=1000,
+                    help="Subset size per KID estimate (min(#real,#fake,#this)).")
+    ap.add_argument("--kid-subsets", type=int, default=10,
+                    help="Number of random subsets for KID (set 0 to disable KID).")
 
     args = ap.parse_args()
 
@@ -888,9 +982,9 @@ def main():
         raise SystemExit(f"Real dir not found: {real_dir}")
 
     # Build shared tools/models (reused across methods)
-    inception = None
-    if args.fid_mode in ("piq","both"):
-        inception = _build_inception_extractor(device)
+    # NOTE: also build inception if we plan to compute KID.
+    need_inception = (args.fid_mode in ("piq","both")) or (args.kid_subsets > 0)
+    inception = _build_inception_extractor(device) if need_inception else None
 
     real_features = None
     if inception is not None:
@@ -899,8 +993,9 @@ def main():
             real_features = _extract_inception_features(real_paths, inception, device,
                                                         num_workers=args.num_workers, batch_size=args.batch_size)
         else:
-            print("No real images found; FID(piq) will be skipped.")
-            inception = None
+            print("No real images found; FID(piq)/KID will be skipped.")
+            if args.fid_mode in ("piq","both"):
+                inception = None  # disable feature-based metrics if no real set
 
     # CLIP setup: use OpenAI JIT only (no model fallback)
     clip_model = None
@@ -927,7 +1022,8 @@ def main():
             device=device, fid_mode=args.fid_mode, match_real_count=args.match_real_count,
             batch_size=args.batch_size, num_workers=args.num_workers, max_pairs=args.max_pairs,
             clip_model=clip_model, clip_preproc=clip_preproc,
-            inception=inception, real_features=real_features
+            inception=inception, real_features=real_features,
+            kid_subset_size=args.kid_subset_size, kid_subsets=args.kid_subsets
         )
 
 if __name__ == "__main__":

@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-Diverse SD3.5 (no-embeds, TE=Transformer device, METHOD-CONSISTENT) [cleaned]
+Diverse SD3.5 (no-embeds, TE=Transformer device, METHOD-CONSISTENT) [with A+B noise + init orthogonalization]
 
 特点：
 - 单次生成：指定 prompt，G 张图，固定 guidance 与 steps（可改）
 - 回调：VAE 解码 -> CLIP 体积损失 -> VJP 回 latent -> 写回
 - 确定性项（体积漂移）仅受 gamma(t)（t_gate+sched_shape）调度
-- 噪声：默认为「提前更强」（early noise），可用 --noise-timing 切成 late
+- 噪声：SDE/Brownian 对齐 + 相对 SNR 目标（早强/晚强可配）
+- 批内初始 latent 正交化（i==0 时对 kw["latents"] 进行）
 
 输出：
 - outputs/<method>_<prompt_slug>/{imgs,eval}/
@@ -20,7 +21,6 @@ import sys
 import time
 import argparse
 import traceback
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
@@ -43,7 +43,6 @@ def print_mem_all(tag: str, devices: list):
             lines.append(f"  {d}: CPU")
     print("\n".join(lines), flush=True)
 
-# ---- 更健壮的设备审计（跳过非 nn.Module） ----
 def _first_device_of_module(m: nn.Module):
     if not isinstance(m, nn.Module):
         return None
@@ -121,7 +120,7 @@ def parse_args():
     # 生成参数
     ap.add_argument('--prompt', type=str, required=True)
     ap.add_argument('--negative', type=str, default='')
-    ap.add_argument('--G', type=int, default=4)
+    ap.add_argument('--G', type=int, default=64)  # 默认改为 64
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
@@ -142,14 +141,21 @@ def parse_args():
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)
 
     # 正交/门控
-    ap.add_argument('--partial-ortho', type=float, default=0.95)   # 建议更强的正交（0.8~1.0）
-    ap.add_argument('--t-gate', type=str, default='0.85,0.95')       # 仅用于确定性体积漂移
+    ap.add_argument('--partial-ortho', type=float, default=0.95)   # 体积力对基流正交比例
+    ap.add_argument('--t-gate', type=str, default='0.85,0.95')     # 仅用于确定性体积漂移
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2', 't1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-3)
 
     # 噪声时间形态（新增）：early=前期强，late=后期强
     ap.add_argument('--noise-timing', type=str, default='early', choices=['early', 'late'])
+
+    # -------- 新增（A+B）噪声控制参数 --------
+    ap.add_argument('--eta-sde', type=float, default=1.0, help='SDE/Brownian 噪声强度 (与 scheduler 对齐)')   # [A]
+    ap.add_argument('--rho0', type=float, default=0.25, help='相对 SNR 目标（早期）')                           # [B]
+    ap.add_argument('--rho1', type=float, default=0.05, help='相对 SNR 目标（末期）')                           # [B]
+    ap.add_argument('--noise-partial-ortho', type=float, default=1.0, help='噪声相对基流的正交比例')             # [B]
+    ap.add_argument('--vnorm-threshold', type=float, default=1e-4, help='基流范数过小则跳过噪声投影的阈值')        # [B]
 
     # 设备
     ap.add_argument('--device-transformer', type=str, default='cuda:1')
@@ -200,13 +206,10 @@ def main():
         # 设备 + dtype
         dev_tr  = torch.device(args.device_transformer)
         dev_vae = torch.device(args.device_vae)
-        dev_te1 = torch.device(args.device_text1)
-        dev_te2 = torch.device(args.device_text2)
-        dev_te3 = torch.device(args.device_text3)
         dev_clip= torch.device(args.device_clip)
         dtype   = torch.bfloat16 if dev_tr.type == 'cuda' else torch.float32
 
-        _log(f"Devices: transformer={dev_tr}, vae={dev_vae}, text1={dev_te1}, text2={dev_te2}, text3={dev_te3}, clip={dev_clip}", args.debug)
+        _log(f"Devices: transformer={dev_tr}, vae={dev_vae}, clip={dev_clip}", args.debug)
         _log(f"Model dir: {args.model_dir}", args.debug)
         _log(f"CLIP JIT: {args.clip_jit}", args.debug)
         print_mem_all("before-pipeline-call", [dev_tr, dev_vae, dev_clip])
@@ -260,12 +263,12 @@ def main():
             gamma0=args.gamma0, gamma_max_ratio=args.gamma_max_ratio,
             partial_ortho=args.partial_ortho, t_gate=(float(t0), float(t1)),
             sched_shape=args.sched_shape, clip_image_size=224,
-            leverage_alpha=0.5,   # 你原来写死的 0.5，这里保留
+            leverage_alpha=0.5,
         )
         vol = VolumeObjective(clip, cfg)
         _log("Volume objective ready.", args.debug)
 
-        # ===== 3) 回调：VAE 解码 -> CLIP 体积损失 -> VJP -> 写回 =====
+        # ===== 3) 状态 & 工具函数 =====
         state: Dict[str, Optional[torch.Tensor]] = {
             "prev_latents_vae_cpu": None,
             "prev_ctrl_vae_cpu":   None,
@@ -281,11 +284,7 @@ def main():
             return (out.float().clamp(-1,1) + 1.0) / 2.0           # [0,1]
 
         def _beta_sched(t_norm: float, eps: float = 1e-2) -> float:
-            """
-            噪声时间调度：
-            - early：t_norm≈1（前期）更强 -> base = min(1, t/(1-t+eps))
-            - late ：t_norm≈0（后期）更强 -> base = min(1, (1-t)/(t+eps))
-            """
+            # 现仅用于相对 SNR 插值（保持接口）
             t = float(t_norm)
             if args.noise_timing == 'early':
                 base = min(1.0, t / (1.0 - t + eps))
@@ -293,16 +292,61 @@ def main():
                 base = min(1.0, (1.0 - t) / (t + eps))
             return float(base)
 
+        # [A] Brownian 尺度（尽可能对齐调度器）
+        def _brownian_std_from_scheduler(ppl, i):
+            sch = ppl.scheduler
+            try:
+                if hasattr(sch, "sigmas"):
+                    s = sch.sigmas.float()
+                    cur = s[i].item()
+                    nxt = s[i+1].item() if i+1 < len(s) else s[i].item()
+                    var = max(nxt**2 - cur**2, 0.0)
+                    return float(var**0.5)
+                elif hasattr(sch, "alphas_cumprod"):
+                    ac = sch.alphas_cumprod.float()
+                    cur = ac[i].item()
+                    nxt = ac[i+1].item() if i+1 < len(ac) else ac[i].item()
+                    sig2_cur = max(1.0 - cur, 0.0)
+                    sig2_nxt = max(1.0 - nxt, 0.0)
+                    var = max(sig2_nxt - sig2_cur, 0.0)
+                    return float(var**0.5)
+            except Exception:
+                pass
+            # 回退：用归一化步长 √Δt
+            ts = sch.timesteps
+            t_cur  = float(ts[i].item())
+            t_next = float(ts[i+1].item()) if i+1 < len(ts) else float(ts[-1].item())
+            t_max, t_min = float(ts[0].item()), float(ts[-1].item())
+            dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
+            return float(dt_unit**0.5)
+
+        # === 批内初噪正交化（你的实现，原样并入） ===
+        def _batch_orthogonalize(x, eps: float = 1e-8):
+            # x: [B, C, H, W]
+            B = x.size(0)
+            y = x.view(B, -1)  # [B, M]
+            Q = torch.zeros_like(y)
+            for i in range(B):
+                v = y[i]
+                for j in range(i):
+                    v = v - (v @ Q[j]) * Q[j]
+                n = v.norm(p=2) + eps
+                Q[i] = v / n
+            return Q.view_as(x)
+
+        # ===== 回调：一步步注入多样性 =====
         def diversity_callback(ppl, i, t, kw):
-            # 1) 从调度器拿“真实时间”和本步步长 Δt（严格 FM）
             ts = ppl.scheduler.timesteps
             t_cur  = float(ts[i].item())
             t_next = float(ts[i+1].item()) if i+1 < len(ts) else float(ts[-1].item())
             t_max, t_min = float(ts[0].item()), float(ts[-1].item())
-            # 规范化时间到 [1,0]
             t_norm = (t_cur - t_min) / (t_max - t_min + 1e-8)
-            # 单位化步长
             dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
+
+            # ---------- 批内初始 latent 正交化（只在第 0 步） ----------
+            if i == 0 and "latents" in kw and kw["latents"] is not None:
+                with torch.no_grad():
+                    kw["latents"] = _batch_orthogonalize(kw["latents"])
 
             lat = kw.get("latents")
             if lat is None:
@@ -330,7 +374,7 @@ def main():
                 z = lat_vae_full[s:e].detach().clone().requires_grad_(True)
 
                 # —— 解码到像素 —— #
-                with torch.enable_grad(), cudnn.flags(enabled=False, benchmark=False, deterministic=False):
+                with torch.enable_grad(), torch.backends.cudnn.flags(enabled=False, benchmark=False, deterministic=False):
                     imgs_chunk = checkpoint(lambda zz: _vae_decode_pixels(zz), z, use_reentrant=False)
 
                 # —— CLIP 卡上求体积损失对“像素”的梯度 ——
@@ -338,7 +382,7 @@ def main():
                 _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
                 current_logdet = float(_logs.get("logdet", 0.0))
 
-                # E2: 能量单调守门（若下降则削弱 gamma）
+                # 能量单调守门（若下降则削弱 gamma）
                 last_logdet = state.get("last_logdet", None)
                 if (last_logdet is not None) and (current_logdet < last_logdet):
                     gamma_sched = 0.5 * gamma_sched
@@ -369,17 +413,36 @@ def main():
                 g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
                 div_disp = g_proj * dt_unit  # 确定性体积位移（γ 只作用这里）
 
-                # --- 正交噪声：默认「前期更强」；不乘 γ ---
-                beta = _beta_sched(t_norm)
-                if (beta > 0.0) and (v_est is not None):
-                    xi = torch.randn_like(g_proj)
-                    xi = project_partial_orth(xi, v_est, 1.0)  # 对基流完全正交
-                    noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
+                # ===================== 噪声项（A + B）=====================
+                brown_std = _brownian_std_from_scheduler(ppl, i)  # 标量
+                eta = float(args.eta_sde)
+                base_brown = eta * brown_std
+
+                if args.noise_timing == 'early':
+                    rho_t = args.rho0 * t_norm + args.rho1 * (1.0 - t_norm)
                 else:
-                    noise_disp = torch.zeros_like(g_proj)
+                    rho_t = args.rho1 * t_norm + args.rho0 * (1.0 - t_norm)
+
+                base_disp = (v_est * dt_unit) if v_est is not None else z
+                base_norm = _bn(base_disp)  # [bs]
+
+                target_brown = torch.full_like(base_norm, fill_value=max(base_brown, 0.0))
+                target_snr   = torch.clamp(base_norm * max(rho_t, 0.0), min=0.0)
+                target = torch.minimum(target_brown, target_snr)  # [bs]
+
+                xi = torch.randn_like(g_proj)
+
+                vnorm = _bn(v_est) if v_est is not None else None
+                if (v_est is None) or (vnorm is None) or (float(vnorm.mean().item()) < float(args.vnorm_threshold)):
+                    xi_eff = xi
+                else:
+                    xi_eff = project_partial_orth(xi, v_est, float(args.noise_partial_ortho))
+
+                xi_norm = _bn(xi_eff)  # [bs]
+                noise_disp = xi_eff / (xi_norm.view(-1,1,1,1) + 1e-12) * target.view(-1,1,1,1)
+                # =================== 噪声项（A + B）结束 ===================
 
                 # 可选信赖域：仅限幅体积位移（不限制噪声）
-                base_disp = (v_est * dt_unit) if v_est is not None else z
                 disp_cap  = cfg.gamma_max_ratio * _bn(base_disp)
                 div_raw   = _bn(div_disp)
                 scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (div_raw + 1e-12))
@@ -394,6 +457,14 @@ def main():
                 if "ctrl_cache" not in state:
                     state["ctrl_cache"] = []
                 state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
+
+                if args.debug and (s == 0):
+                    with torch.no_grad():
+                        n_div   = _bn(div_disp).mean().item()
+                        n_noise = _bn(noise_disp).mean().item()
+                        n_base  = _bn(base_disp).mean().item()
+                        print(f"[t={t_norm:.2f}] |base|={n_base:.4f} |div|={n_div:.4f} |noise|={n_noise:.4f} "
+                              f"gamma={gamma_sched:.4f} brown={brown_std:.4f} rho_t={rho_t:.3f}")
 
                 if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
                 if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
@@ -450,7 +521,7 @@ def main():
             if hasattr(pipe.vae, "enable_slicing"): pipe.vae.enable_slicing()
             if hasattr(pipe.vae, "enable_tiling"):  pipe.vae.enable_tiling()
 
-        with torch.inference_mode(), cudnn.flags(enabled=False, benchmark=False, deterministic=False):
+        with torch.inference_mode(), torch.backends.cudnn.flags(enabled=False, benchmark=False, deterministic=False):
             images = checkpoint(
                 lambda z: (pipe.vae.decode(z / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0,
                 latents_final, use_reentrant=False

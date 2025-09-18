@@ -33,7 +33,6 @@ def print_mem_all(tag: str, devices: list):
             lines.append(f"  {d}: CPU")
     print("\n".join(lines), flush=True)
 
-# ---- 更健壮的设备审计（跳过非 nn.Module） ----
 def _first_device_of_module(m: nn.Module):
     if not isinstance(m, nn.Module):
         return None
@@ -97,7 +96,6 @@ def _log(s, debug=True):
     ts = time.strftime("%H:%M:%S")
     if debug: print(f"[{ts}] {s}", flush=True)
 
-# ------------- 新增：解析 {concept: [prompts...]} -------------
 def _parse_concepts_spec(obj: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
     if not isinstance(obj, dict):
         raise ValueError("Spec must be a JSON object: {concept: [prompts...]}")
@@ -137,32 +135,27 @@ def parse_args():
     ap.add_argument('--prompt', type=str, default=None, help='Single prompt if --spec not provided')
     ap.add_argument('--negative', type=str, default='')
 
-    # Grid
     ap.add_argument('--G', type=int, default=4)
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
-    ap.add_argument('--guidance', type=float, default=3.0)                  # 单值回退
-    ap.add_argument('--guidances', type=float, nargs='+', default=[3.0, 5.0, 7.5])  # 多值，默认 3.0/5.0/7.5
-    ap.add_argument('--seed', type=int, default=42)                         # 单值回退
-    ap.add_argument('--seeds', type=int, nargs='+', default=[1111, 2222, 3333, 4444])  # 多值，默认四个
+    ap.add_argument('--guidance', type=float, default=3.0)                  
+    ap.add_argument('--guidances', type=float, nargs='+', default=[3.0, 5.0, 7.5])  
+    ap.add_argument('--seed', type=int, default=42)                         
+    ap.add_argument('--seeds', type=int, nargs='+', default=[1111, 2222, 3333, 4444])  
 
-    # Model & output naming
     ap.add_argument('--model-dir', type=str, default=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'stable-diffusion-3.5-medium')))
     ap.add_argument('--clip-jit', type=str, default=os.path.expanduser('~/.cache/clip/ViT-B-32.pt'))
-    ap.add_argument('--out', type=str, default=None)  # 不再用于路径决定，仅保留兼容
-    ap.add_argument('--method',type=str,default='ourmethod')  # 输出路径 uses outputs/{method}_{concept}
-
-    # 方法超参（保持原样）
+    ap.add_argument('--out', type=str, default=None)  
+    ap.add_argument('--method',type=str,default='ourmethod')
     ap.add_argument('--gamma0', type=float, default=0.10)
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)
     ap.add_argument('--partial-ortho', type=float, default=0.90)
-    ap.add_argument('--t-gate', type=str, default='0.75,0.99')
+    ap.add_argument('--t-gate', type=str, default='0.50,0.99')
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2','t1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-4)
 
-    # 设备（保持原样）
     ap.add_argument('--device-transformer', type=str, default='cuda:1')
     ap.add_argument('--device-vae',         type=str, default='cuda:0')
     ap.add_argument('--device-clip',        type=str, default='cuda:0')
@@ -178,13 +171,11 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # ===== sys.path 注入（让脚本能 import diverse_flow） =====
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(current_dir)
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
-    # 解析 JSON / 单 prompt
     if args.spec:
         with open(args.spec, 'r', encoding='utf-8') as f:
             spec_obj = json.load(f, object_pairs_hook=OrderedDict)
@@ -194,7 +185,6 @@ def main():
     else:
         raise ValueError("Provide --spec (JSON with {concept:[prompts...]}) or --prompt")
 
-    # TE 默认与 Transformer 同卡
     if args.device_text1 is None: args.device_text1 = args.device_transformer
     if args.device_text2 is None: args.device_text2 = args.device_transformer
     if args.device_text3 is None: args.device_text3 = args.device_transformer
@@ -213,7 +203,6 @@ def main():
         from diverse_flow.utils import sched_factor as time_sched_factor
         from diverse_flow.utils import batched_norm as _bn
 
-        # 设备 + dtype
         dev_tr  = torch.device(args.device_transformer)
         dev_vae = torch.device(args.device_vae)
         dev_te1 = torch.device(args.device_text1)
@@ -228,7 +217,6 @@ def main():
 
         print_mem_all("before-pipeline-call", [dev_tr, dev_vae, dev_clip])
 
-        # ===== 1) CPU 加载，再手动上卡 =====
         model_dir = _resolve_model_dir(args.model_dir)
         _log("Loading SD3.5 (CPU) ...", args.debug)
         pipe = StableDiffusion3Pipeline.from_pretrained(
@@ -282,17 +270,14 @@ def main():
         vol = VolumeObjective(clip, cfg)
         _log("Volume objective ready.", args.debug)
 
-        # ======= 目录：按 concept 分 outputs/{method}_{concept}/... =======
         for concept, prompts in concept_to_prompts.items():
             base_dir, imgs_root, eval_dir = _build_root_out(project_root, args.method, concept)
             _log(f"[OUT] base={base_dir}", True)
 
-            # 对每个 prompt × guidance × seed 跑一次
             for prompt_text in prompts:
                 for g in (args.guidances if args.guidances is not None else [args.guidance]):
                     for sd in (args.seeds if args.seeds is not None else [args.seed]):
 
-                        # ===== 3) 回调定义（每次 run 重置 state，避免跨 run 污染） =====
                         state = {
                             "prev_latents_vae_cpu": None,
                             "prev_ctrl_vae_cpu":   None,
@@ -316,21 +301,18 @@ def main():
                             return F.conv2d(x, w, padding=pad, groups=x.size(1))
 
                         def diversity_callback(ppl, i, t, kw):
-                            # 1) 从调度器拿“真实时间”和本步步长 Δt（严格 FM）
                             ts = ppl.scheduler.timesteps
                             t_cur  = float(ts[i].item())
                             t_next = float(ts[i+1].item()) if i+1 < len(ts) else float(ts[-1].item())
                             t_max, t_min = float(ts[0].item()), float(ts[-1].item())
-                            # 规范化时间到 [1,0]
+
                             t_norm = (t_cur - t_min) / (t_max - t_min + 1e-8)
-                            # 单位化步长
                             dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
 
                             lat = kw.get("latents")
                             if lat is None:
                                 return kw
 
-                            # γ 仅用于确定性体积漂移（gating by t_gate）
                             gamma_sched = cfg.gamma0 * time_sched_factor(t_norm, cfg.t_gate, cfg.sched_shape)
                             if gamma_sched <= 0:
                                 state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
@@ -340,7 +322,6 @@ def main():
 
                             lat_new = lat.clone()
 
-                            # 把本步 latent 搬到 VAE 卡
                             lat_vae_full = lat.detach().to(dev_vae, non_blocking=True).clone()
                             B = lat_vae_full.size(0)
                             chunk = 2 if B >= 2 else 1
@@ -355,16 +336,13 @@ def main():
                                 e = min(B, s + chunk)
                                 z = lat_vae_full[s:e].detach().clone().requires_grad_(True)
 
-                                # —— 解码到像素 —— #
                                 with torch.enable_grad(), cudnn.flags(enabled=False, benchmark=False, deterministic=False):
                                     imgs_chunk = checkpoint(lambda zz: _vae_decode_pixels(zz), z, use_reentrant=False)
 
-                                # —— CLIP 卡上求体积损失对“像素”的梯度 —— 
                                 imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
                                 _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
                                 current_logdet = float(_logs.get("logdet", 0.0))
 
-                                # E2: 能量单调守门（若下降则削弱 gamma）
                                 last_logdet = state.get("last_logdet", None)
                                 if (last_logdet is not None) and (current_logdet < last_logdet):
                                     gamma_sched = 0.5 * gamma_sched
@@ -372,13 +350,11 @@ def main():
 
                                 grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
 
-                                # —— VJP 回 latent —— #
                                 grad_lat = torch.autograd.grad(
                                     outputs=imgs_chunk, inputs=z, grad_outputs=grad_img_vae,
                                     retain_graph=False, create_graph=False, allow_unused=False
                                 )[0]  # [bs,C,h,w] on VAE
 
-                                # —— 基流速度估计：v_est = Δz / Δt —— 
                                 v_est = None
                                 if prev_cpu is not None:
                                     total_diff = z - prev_cpu[s:e].to(dev_vae, non_blocking=True)
@@ -391,20 +367,19 @@ def main():
                                     else:
                                         v_est = total_diff / max(dt_unit, 1e-8)
 
-                                # —— 体积力：对基流（部分/全）正交 —— #
                                 g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
                                 if v_est is not None:
                                     vnorm = _bn(v_est)          # [B,1]
                                     gnorm = _bn(g_proj)         # [B,1]
                                     scale_g = torch.minimum(torch.ones_like(vnorm), vnorm / (gnorm + 1e-12))
                                     g_proj = g_proj * scale_g.view(-1, 1, 1, 1)
-                                div_disp = g_proj * dt_unit  # 确定性体积位移（γ 只作用这里）
+                                div_disp = g_proj * dt_unit  
 
                                 beta = _beta_monotone(t_norm, eps=1e-2)
                                 if (beta > 0.0) and (v_est is not None):
                                     xi = torch.randn_like(g_proj)
-                                    xi = project_partial_orth(xi, v_est, 1.0)      # 先全正交到基流
-                                    xi = _lowpass(xi, k=3)                         # 低频化
+                                    xi = project_partial_orth(xi, v_est, 1.0)      
+                                    xi = _lowpass(xi, k=3)                         
                                     xi = xi - xi.mean(dim=(1,2,3), keepdim=True)
                                     xi = xi / (_bn(xi).view(-1,1,1,1) + 1e-12)
                                     noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
@@ -416,13 +391,11 @@ def main():
                                 div_raw   = _bn(div_disp)
                                 scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (div_raw + 1e-12))
 
-                                # 最终位移写回：γ 只缩放体积位移；噪声直接叠加
                                 delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * div_disp + noise_disp
 
                                 delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
                                 lat_new[s:e] = lat_new[s:e] + delta_tr
 
-                                # —— 缓存控制位移（CPU）——
                                 if "ctrl_cache" not in state:
                                     state["ctrl_cache"] = []
                                 state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
@@ -437,7 +410,6 @@ def main():
                             state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
                             state["prev_latents_vae_cpu"] = lat_vae_full.detach().to("cpu")
 
-                            # 控制位移与 dt
                             if "ctrl_cache" in state:
                                 state["prev_ctrl_vae_cpu"] = torch.cat(state["ctrl_cache"], dim=0).to("cpu")
                                 del state["ctrl_cache"]
@@ -445,7 +417,6 @@ def main():
 
                             return kw
 
-                        # ===== 4) 生成 latent（不让管线内部 decode），并落到指定 run_dir =====
                         run_dir = _prompt_run_dir(imgs_root, prompt_text, int(sd), float(g), int(args.steps))
                         os.makedirs(run_dir, exist_ok=True)
                         _log(f"[RUN] concept='{concept}' | prompt='{prompt_text}' | seed={sd} | guidance={g} | steps={args.steps} -> {run_dir}", True)
@@ -467,7 +438,6 @@ def main():
                             return_dict=False,
                         )[0]  # -> latent tensor（在 transformer 卡）
 
-                        # ===== 5) 手动在 VAE 卡 decode 最终 latent =====
                         sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
                         latents_final = latents_out.to(dev_vae, non_blocking=True)
 
@@ -479,12 +449,10 @@ def main():
                             images = checkpoint(lambda z: (pipe.vae.decode(z / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0,
                                                 latents_final, use_reentrant=False)
 
-                        # 保存到该组合的子目录
                         from torchvision.utils import save_image
                         for i in range(images.size(0)):
                             save_image(images[i].cpu(), os.path.join(run_dir, f"img_{i:03d}.png"))
 
-                        # 清理临时张量引用
                         del latents_out, latents_final, images
 
         _log("Done.", True)

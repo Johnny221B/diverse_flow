@@ -1,16 +1,7 @@
 {
-    "bicycle": [
-        "a photo of a bicycle",
-        "a bicycle",
-        "a cropped photo of a bicycle",
-        "a close-up photo of a bicycle",
-        "a photo of one bicycle"
-    ],
     "bus": [
         "a photo of a bus",
         "a bus",
-        "a cropped photo of a bus",
-        "a close-up photo of a bus",
         "a photo of one bus"
     ]
 }

@@ -130,7 +130,7 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
     for tick_label, c in zip(ax.get_xticklabels(), [type_colors[t] for (t, a) in order]):
         tick_label.set_color(c)
 
-    ax.legend(handles=handles, title="Method", ncol=min(len(methods), 4), frameon=True, loc='upper right')
+    ax.legend(handles=handles, title="Method", ncol=min(len(methods), 4), frameon=True, loc='lower right')
     fig.tight_layout()
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=220, bbox_inches='tight')

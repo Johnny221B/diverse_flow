@@ -574,8 +574,11 @@ def main():
                             images = (pipe.vae.decode(latents_final / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0
 
                         from torchvision.utils import save_image
-                        for i in range(images.size(0)):
-                            save_image(images[i].cpu(), os.path.join(run_dir, f"img_{i:03d}.png"))
+                        zpad = 2
+
+                        for i in range(images.size(0)):  
+                            fname = f"{i:02d}.png"        
+                            save_image(images[i].cpu(), os.path.join(run_dir, fname))
 
                         # 显存友好：释放 run 级变量
                         del latents_out, latents_final, images

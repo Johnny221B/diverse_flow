@@ -187,21 +187,27 @@ def plot_cov_tau_panel(
     axes[0].set_ylabel("Coverage")
 
     legend_methods = [m for m in methods if m in plotted_methods] or methods
+
+    # Title higher
+    if title is None:
+        title = f"Mode Coverage vs. Threshold ($\\tau$) for the '{concept}' Concept"
+    fig.suptitle(title, y=0.90, fontsize=14)
+
+    # Legend: single row centered between title and subplots
     fig.legend(
         handles=[plt.Line2D([0], [0], color=color_map[m], lw=2.2) for m in legend_methods],
         labels=[_norm_label(m) for m in legend_methods],
-        loc=legend_loc,
-        ncol=2,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.85),     # between suptitle (0.99) and axes
+        ncol=len(legend_methods),        # one row
         frameon=False,
-        bbox_to_anchor=(0.98, 0.98),
-        bbox_transform=fig.transFigure,
+        columnspacing=1.5,
+        handlelength=2.5,
     )
 
-    if title is None:
-        title = f"Mode Coverage vs. Threshold ($\\tau$) for the '{concept}' Concept"
-    fig.suptitle(title, y=0.95, fontsize=14)
+    # Leave headroom for legend/title
+    fig.tight_layout(rect=[0, 0, 0.90, 0.90])
 
-    fig.tight_layout(rect=[0, 0, 0.9, 1])
 
     if save_path:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)

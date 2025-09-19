@@ -27,7 +27,6 @@ def lighten_color(color, amount=0.85):
     return [1 - (1 - r) * (1 - amount), 1 - (1 - g) * (1 - amount), 1 - (1 - b) * (1 - amount)]
 
 def collect_order_union(method_to_data: dict):
-    """统一属性顺序：以第一个方法为基准，其他方法补齐缺失项。"""
     methods = list(method_to_data.keys())
     first = method_to_data[methods[0]]
     order, by_type = [], {}
@@ -50,21 +49,20 @@ def collect_order_union(method_to_data: dict):
             order2.append((t, a))
     return order2, type_order, by_type
 
-# ---------- 强对比纹理样式 ----------
+# ---------- style patterns ----------
 STYLE_LIBRARY = {
     "solid":       dict(hatch=None,    face_mode="solid"),
     "dense_grid":  dict(hatch="xxxx",  face_mode="light"),
     "diag":        dict(hatch="////",  face_mode="light"),
     "backslash":   dict(hatch="\\\\\\\\", face_mode="light"),
     "dots":        dict(hatch="..",    face_mode="light"),
-    "rings":       dict(hatch="OO",    face_mode="light"),
-    "cross":       dict(hatch="++",    face_mode="light"),
+    "rings":        dict(hatch="OO",    face_mode="light"),
+    "cross":        dict(hatch="++",    face_mode="light"),
     "bars":        dict(hatch="|||",   face_mode="light"),
 }
 DEFAULT_STYLE_CYCLE = ["solid", "dense_grid", "diag", "dots", "backslash", "rings", "cross", "bars"]
 
 def parse_style_map(s: str | None) -> dict:
-    """形如 'pg=solid,cads=dense_grid,dpp=diag' -> dict"""
     if not s: return {}
     out = {}
     for kv in s.split(","):
@@ -73,14 +71,42 @@ def parse_style_map(s: str | None) -> dict:
             out[k.strip()] = v.strip()
     return out
 
-# ---------- 绘图 ----------
+# ---------- two-line labels ----------
+def _two_lines(label: str, min_len: int = 14) -> str:
+    if len(label) < min_len or "-" not in label:
+        return label
+    parts = label.split("-")
+    best = None
+    for k in range(1, len(parts)):
+        left = "-".join(parts[:k])
+        right = "-".join(parts[k:])
+        score = abs(len(left) - len(right))
+        if best is None or score < best[0]:
+            best = (score, f"{left}\n{right}")
+    return best[1]
+
+# ---------- method label formatting ----------
+def _format_method_label(method: str) -> str:
+    method_lower = method.strip().lower()
+    if method_lower == "pg":
+        return "PG"
+    elif method_lower == "dpp":
+        return "DPP"
+    elif method_lower == "cads":
+        return "CADS"
+    elif method_lower == "ourmethod":
+        return "Ourmethod"
+    return method
+
+# ---------- plotting ----------
 def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.png", method_styles: dict | None=None):
     order, type_order, attrs_by_type = collect_order_union(method_to_data)
     cmap = plt.get_cmap('tab10')
     type_colors  = {t: cmap(i % 10) for i, t in enumerate(type_order)}
     bar_base_col = {t: darken_color(type_colors[t], amount=0.35) for t in type_order}
 
-    labels = [f"{t}-{a}" for (t, a) in order]
+    raw_labels = [f"{t}-{a}" for (t, a) in order]
+    labels = [_two_lines(s) for s in raw_labels]
     x = np.arange(len(labels))
     methods = list(method_to_data.keys())
     M = len(methods)
@@ -89,7 +115,16 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    # 背景带：按属性类型
+    if score_type.upper() == "DIM":
+        y_min, y_max = -0.40, 0.60
+        legend_loc = 'lower right'
+    elif score_type.upper() == "CIM":
+        y_min, y_max = 0.00, 1.00
+        legend_loc = 'upper right'
+    else:
+        y_min, y_max = -1, 1
+        legend_loc = 'lower right'
+
     start = 0
     for t in type_order:
         n = len(attrs_by_type[t])
@@ -115,22 +150,24 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
             ax.bar(x_i[j], v, width=bar_width, color=colors[j],
                    edgecolor="black", linewidth=0.9, hatch=hatch)
 
-        # 图例补丁
         legend_face = "white" if face_mode != "solid" else bar_base_col[type_order[0]]
-        handles.append(mpatches.Patch(facecolor=legend_face, edgecolor="black", hatch=hatch, label=method))
+        formatted_label = _format_method_label(method)
+        handles.append(mpatches.Patch(facecolor=legend_face, edgecolor="black", hatch=hatch, label=formatted_label))
 
     ax.axhline(0, color='gray', linewidth=0.8, linestyle='--', alpha=0.8)
-    ax.set_ylim(-1, 1)
+    ax.set_ylim(y_min, y_max)
     ax.set_ylabel(score_type)
     ax.set_xlabel('Attributes')
     ax.set_title(f'{score_type}: multi-method comparison')
 
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
+    ax.set_xticklabels(labels, rotation=0, ha='center', linespacing=0.9)
+    ax.tick_params(axis='x', labelsize=8)
+
     for tick_label, c in zip(ax.get_xticklabels(), [type_colors[t] for (t, a) in order]):
         tick_label.set_color(c)
 
-    ax.legend(handles=handles, title="Method", ncol=min(len(methods), 4), frameon=True, loc='lower right')
+    ax.legend(handles=handles, title="Method", ncol=min(len(methods), 4), frameon=True, loc=legend_loc)
     fig.tight_layout()
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=220, bbox_inches='tight')
@@ -139,19 +176,17 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
 # ---------- CLI ----------
 def main():
     ap = argparse.ArgumentParser(description="Compare DIM/CIM across methods and save a single plot.")
-    ap.add_argument("--root", default=".", help="根路径（包含 outputs/）; 例如 /path/to/xxx")
-    ap.add_argument("--methods", nargs="+", required=True, help="方法列表，如 pg cads dpp")
-    ap.add_argument("--concept", required=True, help="概念，如 bus")
-    ap.add_argument("--score-type", choices=["DIM", "CIM"], default="DIM", help="选择绘制 DIM 或 CIM")
+    ap.add_argument("--root", default=".", help="Root path containing outputs/")
+    ap.add_argument("--methods", nargs="+", required=True, help="Method list, e.g., pg cads dpp")
+    ap.add_argument("--concept", required=True, help="Concept, e.g., bus")
+    ap.add_argument("--score-type", choices=["DIM", "CIM"], default="DIM", help="Choose to plot DIM or CIM")
     ap.add_argument("--styles", default=None,
-                    help="可选：方法到样式映射，例如 'pg=solid,cads=dense_grid,dpp=diag'")
-    ap.add_argument("--save-dir", default="./experiment4", help="保存目录（默认 ./experiment4）")
+                    help="Optional: method to style mapping, e.g., 'pg=solid,cads=dense_grid,dpp=diag'")
+    ap.add_argument("--save-dir", default="./experiment4", help="Save directory (default ./experiment4)")
     args = ap.parse_args()
 
-    # 选择文件名：DIM 用 dim_scores.json；CIM 用 cim_scores.json
     scores_file = "dim_scores.json" if args.score_type.upper() == "DIM" else "cim_scores.json"
 
-    # 收集各方法的 json 路径与数据
     method_to_data = {}
     missing = []
     for m in args.methods:
@@ -162,7 +197,7 @@ def main():
         method_to_data[m] = read_json(p)
 
     if not method_to_data:
-        raise FileNotFoundError(f"没有找到任何可用的 {scores_file}：\n" + "\n".join(missing))
+        raise FileNotFoundError(f"No available {scores_file} found:\n" + "\n".join(missing))
 
     save_path = Path(args.save_dir) / f"{args.concept}_{args.score_type.upper()}.png"
     method_styles = parse_style_map(args.styles)

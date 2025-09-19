@@ -1,30 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Normalized entropy visualization (auto path, multi-style with global legend & overlap-safe annotations).
-
-Reads CSVs from:
-  {outputs_root}/{method}_{concept}/eval/exp3_entropy_{concept}.csv
-Columns required (case-insensitive):
-  method, concept, guidance, entropy_mean [, entropy_std or entropy_sd]
-
-Styles:
-  - facetbars : per-guidance subplots; bars = methods; global legend by method; error bars = ±SD
-  - heatmap   : method × guidance heatmap; cell annotated with μ±σ
-  - dumbbell  : per-method rows; x=entropy; colored by guidance; horizontal ±SD
-
-Examples:
-python plot_entropy_auto.py \
-  --concept truck \
-  --methods dpp,pg,cads \
-  --guidances 3.0,5.0,7.5 \
-  --outputs_root /mnt/data/flow_grpo/flow_base/outputs \
-  --style facetbars \
-  --annot_pad 0.03 \
-  --out /tmp/entropy_truck.png
-"""
-
 import argparse
 from pathlib import Path
 import sys
@@ -35,7 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
 from matplotlib.patches import Patch
 
-# ================= Font (Times with fallback) =================
+# ---------- Font (Times with fallback) ----------
 def _pick_font(preferred_list):
     names = {f.name.lower(): f.name for f in fm.fontManager.ttflist}
     for want in preferred_list:
@@ -64,7 +40,16 @@ def _ensure_font(font_path=None):
     mpl.rcParams["axes.unicode_minus"] = False
     print(f"[INFO] Using font family: {picked}")
 
-# ================= CSV I/O =================
+# ---------- Label normalization ----------
+def _norm_method_label(s: str) -> str:
+    lo = s.strip().lower()
+    if lo == "pg": return "PG"
+    if lo == "dpp": return "DPP"
+    if lo == "cads": return "CADS"
+    if lo == "ourmethod": return "Ourmethod"
+    return s
+
+# ---------- CSV I/O ----------
 def _read_csv_norm(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     df.columns = [c.strip().lower() for c in df.columns]
@@ -107,13 +92,12 @@ def _load_all(concept, methods, guidances, outputs_root, debug=False):
     df = df[df["guidance"].isin(set(gids))]
     if df.empty:
         raise ValueError("After filtering by guidances, no data remains.")
-
-    # Aggregate duplicates
     df = (df.groupby(["method","concept","guidance"], as_index=False)
             .agg(entropy_mean=("entropy_mean","mean"),
                  entropy_std =("entropy_std","mean")))
     return df
 
+# ---------- Facet bars ----------
 def _facet_bars(
     df, concept, methods, guidances,
     title=None,
@@ -121,7 +105,7 @@ def _facet_bars(
     annotate=True,
     annot_fmt="{:.3f}±{:.3f}",
     show_legend=True,
-    legend_loc="upper center", # Note: This argument is now overridden for top-right placement
+    legend_loc="upper right",
     annot_pad=0.02,
 ):
     methods_order   = [m for m in methods if m in set(df["method"])]
@@ -131,13 +115,12 @@ def _facet_bars(
     fig, axes = plt.subplots(1, n_g, figsize=(3.0*n_g + 1.8, 3.2), sharey=True)
     if n_g == 1: axes = [axes]
 
-    colors      = plt.get_cmap("tab10").colors
+    colors = plt.get_cmap("tab10").colors
     color_map = {m: colors[i % len(colors)] for i, m in enumerate(methods_order)}
-    legend_handles = [Patch(facecolor=color_map[m], edgecolor="none", label=m) for m in methods_order]
+    legend_handles = [Patch(facecolor=color_map[m], edgecolor="none", label=_norm_method_label(m)) for m in methods_order]
 
     global_top_needed = 0.0
 
-    # The main plotting loop remains the same
     for ax, g in zip(axes, guidances_order):
         xs, ys, es, cols = [], [], [], []
         x_centers = np.arange(len(methods_order), dtype=float)
@@ -150,52 +133,43 @@ def _facet_bars(
                 xs.append(x_centers[i]); ys.append(mu); es.append(sd); cols.append(color_map[m])
                 global_top_needed = max(global_top_needed, mu + (sd if show_error else 0.0) + annot_pad + 0.015)
 
-        bars = ax.bar(xs, ys, color=cols, width=0.65)
+        ax.bar(xs, ys, color=cols, width=0.65)
         if show_error and len(xs):
             ax.errorbar(xs, ys, yerr=es, fmt="none", ecolor="black", elinewidth=1, capsize=3, capthick=1)
 
         if annotate and len(xs):
             for x, y, s in zip(xs, ys, es):
                 y_text = y + (s if show_error else 0.0) + annot_pad
-                ax.text(x, y_text, f"{y:.3f}", ha="center", va="bottom", fontsize=8, clip_on=False) # Simplified annotation
+                ax.text(x, y_text, f"{y:.3f}", ha="center", va="bottom", fontsize=8, clip_on=False)
 
-        ax.set_title(f"guidance={g:.1f}", fontsize=11)
+        ax.set_title(f"CFG={g:.1f}", fontsize=11)  # <-- changed here
         ax.set_xticks(x_centers)
-        ax.set_xticklabels(methods_order, rotation=45, ha="right") # Rotated labels for readability
+        ax.set_xticklabels([_norm_method_label(m) for m in methods_order], rotation=0, ha="center")  # <-- changed here
         ax.grid(axis="y", alpha=0.3, ls="--")
         ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
 
     y_top = max(1.08, global_top_needed + 0.01) if global_top_needed > 0 else 1.08
     for ax in axes: ax.set_ylim(0.0, min(1.12, y_top))
 
-    # CHANGED: Made y-axis label more descriptive
     axes[0].set_ylabel("Normalized Entropy ($H/\\log K$)")
-
-    # === START OF KEY CHANGES ===
-
-    # CHANGED: A more descriptive, larger title
     if title is None:
         title = f"Normalized Entropy for the '{concept}' Concept"
-    fig.suptitle(title, y=1.05, fontsize=14)
-    
-    # CHANGED: Legend positioning and layout
+    fig.suptitle(title, y=0.94, fontsize=14)
+
     if show_legend and legend_handles:
         fig.legend(
-            handles=legend_handles, 
-            loc='upper right',
-            bbox_to_anchor=(1.0, 1.0),   # Anchor to the top-right of the figure
-            ncol=2,                     # Arrange in 2 columns
+            handles=legend_handles,
+            loc=legend_loc,
+            ncol=min(4, len(legend_handles)),
             frameon=False,
-            bbox_transform=fig.transFigure # Use figure coordinates
+            bbox_to_anchor=(0.5, 0.88),
+            bbox_transform=fig.transFigure
         )
 
-    # === END OF KEY CHANGES ===
-    
-    # Adjust layout to make space for the legend on the right
-    fig.tight_layout(rect=[0, 0, 0.9, 1])
-    
+    fig.tight_layout(rect=[0, 0, 1, 0.9])
     return fig
 
+# ---------- Heatmap ----------
 def _heatmap(df, concept, methods, guidances, title=None, annotate=True, annot_fmt="{:.3f}±{:.3f}"):
     methods_order   = [m for m in methods if m in set(df["method"])]
     guidances_order = [float(g) for g in guidances]
@@ -208,8 +182,9 @@ def _heatmap(df, concept, methods, guidances, title=None, annotate=True, annot_f
     ax.set_xticks(np.arange(len(guidances_order)))
     ax.set_xticklabels([f"{g:.1f}" if abs(g-int(g))>1e-6 else f"{int(g)}" for g in guidances_order])
     ax.set_yticks(np.arange(len(methods_order)))
-    ax.set_yticklabels(methods_order)
-    ax.set_xlabel("Guidance"); ax.set_ylabel("Method")
+    ax.set_yticklabels([_norm_method_label(m) for m in methods_order])  # normalize names
+    ax.set_xlabel("CFG")   # <-- changed here
+    ax.set_ylabel("Method")
 
     if annotate:
         for i in range(len(methods_order)):
@@ -227,6 +202,7 @@ def _heatmap(df, concept, methods, guidances, title=None, annotate=True, annot_f
     fig.tight_layout()
     return fig
 
+# ---------- Dumbbell ----------
 def _dumbbell(df, concept, methods, guidances, title=None, show_error=True, annotate=True, annot_fmt="{:.3f}±{:.3f}"):
     methods_order   = [m for m in methods if m in set(df["method"])]
     guidances_order = [float(g) for g in guidances]
@@ -254,18 +230,18 @@ def _dumbbell(df, concept, methods, guidances, title=None, show_error=True, anno
                 ax.text(x + (sd if show_error else 0) + 0.015, y_pos[i],
                         annot_fmt.format(x, sd), va="center", ha="left", fontsize=9)
 
-    ax.set_yticks(y_pos); ax.set_yticklabels(methods_order)
+    ax.set_yticks(y_pos); ax.set_yticklabels([_norm_method_label(m) for m in methods_order])  # normalize names
     ax.set_xlabel("Normalized entropy (H / log K)")
     ax.set_title(title or f"Per-method entropy (dumbbell) | concept={concept}")
     ax.grid(axis="x", alpha=0.3, ls="--")
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     ax.set_xlim(0.0, 1.05)
-    handles = [plt.Line2D([0],[0], color=g_colors[g], marker=g_mark[g], lw=0, label=f"guidance={g:.1f}") for g in guidances_order]
+    handles = [plt.Line2D([0],[0], color=g_colors[g], marker=g_mark[g], lw=0, label=f"CFG={g:.1f}") for g in guidances_order]  # <-- changed here
     ax.legend(handles=handles, loc="upper center", ncol=min(4, len(handles)), frameon=False, bbox_to_anchor=(0.5, 1.12))
     fig.tight_layout()
     return fig
 
-# ================= Main =================
+# ---------- API ----------
 def plot_entropy_auto(
     concept: str,
     methods: list[str],
@@ -273,7 +249,7 @@ def plot_entropy_auto(
     outputs_root: str | Path = "/mnt/data/flow_grpo/flow_base/outputs",
     title: str | None = None,
     save_path: str | None = None,
-    style: str = "facetbars",   # facetbars | heatmap | dumbbell
+    style: str = "facetbars",
     show_error: bool = True,
     annotate: bool = True,
     annot_fmt: str = "{:.3f}±{:.3f}",
@@ -309,7 +285,7 @@ def plot_entropy_auto(
     else:
         plt.show()
 
-# ================= CLI =================
+# ---------- CLI ----------
 def _parse_list(s: str) -> list[str]:
     return [t.strip() for t in s.split(",") if t.strip()]
 
@@ -329,7 +305,7 @@ def main():
     ap.add_argument("--no_annot",    action="store_true")
     ap.add_argument("--no_legend",   action="store_true", help="hide global legend (facetbars)")
     ap.add_argument("--legend_loc",  type=str, default="upper center")
-    ap.add_argument("--annot_pad",   type=float, default=0.02, help="extra vertical padding above (mean+SD) for text in facetbars")
+    ap.add_argument("--annot_pad",   type=float, default=0.02)
     ap.add_argument("--debug",       action="store_true")
     ap.add_argument("--font-path",   type=str, default="", help="Times New Roman .ttf path (optional)")
     args = ap.parse_args()

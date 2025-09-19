@@ -10,13 +10,12 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
 
-# =========================
-# 字体：Times New Roman 优先 + 可靠回退
-# =========================
+# -------------------------
+# Font helpers (Times fallback)
+# -------------------------
 def _pick_font(preferred_list):
     names = {f.name.lower(): f.name for f in fm.fontManager.ttflist}
     for want in preferred_list:
-        # 既支持精确匹配，也支持包含式匹配
         for k, v in names.items():
             if want.lower() == k or want.lower() in k:
                 return v
@@ -24,11 +23,11 @@ def _pick_font(preferred_list):
 
 def _ensure_font(font_path=None, verbose=True):
     preferred = [
-        "Times New Roman",   # Windows / macOS 常见
-        "Times",             # macOS 别名
-        "Nimbus Roman No9 L",# TeX/ghostscript 常见
-        "Liberation Serif",  # 常见替代
-        "DejaVu Serif",      # Matplotlib 自带
+        "Times New Roman",
+        "Times",
+        "Nimbus Roman No9 L",
+        "Liberation Serif",
+        "DejaVu Serif",
     ]
     loaded_from_path = None
     if font_path:
@@ -41,10 +40,7 @@ def _ensure_font(font_path=None, verbose=True):
             except Exception as e:
                 print(f"[WARN] failed to load font from --font-path: {e}", file=sys.stderr)
 
-    picked = loaded_from_path or _pick_font(preferred)
-    if picked is None:
-        picked = mpl.rcParams.get("font.family", ["DejaVu Serif"])[0]
-
+    picked = loaded_from_path or _pick_font(preferred) or mpl.rcParams.get("font.family", ["DejaVu Serif"])[0]
     mpl.rcParams["font.family"] = picked
     mpl.rcParams["pdf.fonttype"] = 42
     mpl.rcParams["ps.fonttype"]  = 42
@@ -53,27 +49,20 @@ def _ensure_font(font_path=None, verbose=True):
         print(f"[INFO] Using font family: {picked}")
 
 # -------------------------
-# 在 eval 目录里找 CSV
+# IO helpers
 # -------------------------
 def _try_csv_candidates(eval_dir: Path, concept: str, g_str: str):
     cand = []
     try:
         g_val = float(g_str)
-        variants = list(dict.fromkeys([
-            g_str,
-            f"{g_val:g}",       # 3
-            f"{g_val:.1f}",     # 3.0
-            f"{g_val:.2f}",     # 3.00
-        ]))
+        variants = list(dict.fromkeys([g_str, f"{g_val:g}", f"{g_val:.1f}", f"{g_val:.2f}"]))
     except:
         variants = [g_str]
-
     for v in variants:
         cand.append(eval_dir / f"exp1_{v}_{concept}.csv")
     for p in cand:
         if p.exists():
             return p
-
     for p in sorted(eval_dir.glob(f"exp1_*_{concept}.csv")):
         return p
     return None
@@ -88,7 +77,6 @@ def _load_one_csv(csv_path: Path, method: str, concept: str, guidance: float):
         df = df[(df["guidance"] - guidance).abs() < 1e-6]
     if df.empty:
         return None
-
     if "recall" in df.columns:
         df = df.sort_values(by=["recall"]).reset_index(drop=True)
 
@@ -103,19 +91,15 @@ def _load_one_csv(csv_path: Path, method: str, concept: str, guidance: float):
     }
     return df, summary
 
-# -------------------------
-# 解析输入来源（根目录/文件）
-# -------------------------
 def _resolve_sources(outputs_root: Path, methods_csv: str, files_csv: str, concept: str, labels_csv: str):
     files_or_roots, methods, labels = [], [], []
-
     if files_csv:
         toks = [t.strip() for t in files_csv.split(",") if t.strip()]
         files_or_roots = [Path(t) for t in toks]
         if methods_csv:
             methods = [m.strip() for m in methods_csv.split(",") if m.strip()]
             if len(methods) != len(files_or_roots):
-                print("[ERROR] 当使用 --files 时，若提供 --methods，二者数量必须一致。", file=sys.stderr)
+                print("[ERROR] when using --files, the number of --methods must match.", file=sys.stderr)
                 sys.exit(1)
         else:
             for p in files_or_roots:
@@ -128,25 +112,35 @@ def _resolve_sources(outputs_root: Path, methods_csv: str, files_csv: str, conce
             labels = methods[:]
     else:
         if outputs_root is None or not methods_csv:
-            print("[ERROR] 未提供 --files 时，需要 --outputs_root 与 --methods", file=sys.stderr)
+            print("[ERROR] without --files, you must provide --outputs_root and --methods", file=sys.stderr)
             sys.exit(1)
         methods = [m.strip() for m in methods_csv.split(",") if m.strip()]
         files_or_roots = [outputs_root / f"{m}_{concept}" / "eval" for m in methods]
         labels = [s.strip() for s in labels_csv.split(",")] if labels_csv else methods[:]
         if len(labels) != len(files_or_roots):
             labels = methods[:]
-
     return files_or_roots, methods, labels
 
 # -------------------------
-# 三联图：每子图一个 guidance，子图内各自图例
+# Label normalization for legend
+# -------------------------
+def _legend_label(label: str):
+    lower = label.strip().lower()
+    if lower == "pg": return "PG"
+    if lower == "dpp": return "DPP"
+    if lower == "cads": return "CADS"
+    if lower == "ourmethod": return "Ourmethod"
+    return label
+
+# -------------------------
+# Plot
 # -------------------------
 def plot_guidances_panel(
     files_or_roots,
     methods,
     labels,
     concept,
-    guidances,          # list[str or float]
+    guidances,
     save_dir: Path,
     title_suffix="",
     xlim=None,
@@ -195,12 +189,12 @@ def plot_guidances_panel(
                 ax.fill_between(x, y - sd, y + sd, color=color_map[method], alpha=0.18, lw=0)
 
             handles.append(ln)
-            leg_labels.append(f"{label} (AUC={summary['auc_prd_mu']:.3f})")
+            leg_labels.append(f"{_legend_label(label)} (AUC={summary['auc_prd_mu']:.3f})")
 
             summary_rows.append({
                 "guidance": float(g),
                 "method": method,
-                "label": label,
+                "label": _legend_label(label),
                 "auc_prd_mu": summary["auc_prd_mu"],
                 "rec_at_p0.60_mu": summary["rec_at_p0.60_mu"],
                 "rec_at_p0.70_mu": summary["rec_at_p0.70_mu"],
@@ -211,7 +205,7 @@ def plot_guidances_panel(
         ax.grid(True, ls="--", alpha=0.35)
         if xlim: ax.set_xlim(*xlim)
         if ylim: ax.set_ylim(*ylim)
-        ax.set_title(f"guidance={float(g):.1f}", fontsize=11)
+        ax.set_title(f"CFG={float(g):.1f}", fontsize=11)  # <-- changed from guidance= to CFG=
 
         if handles:
             leg = ax.legend(handles, leg_labels, loc=legend_loc, frameon=True, fontsize=9)
@@ -220,15 +214,15 @@ def plot_guidances_panel(
 
     fig.supxlabel("Recall")
     fig.supylabel("Precision")
-    ttl = f"PRD on '{concept}': method comparison under identical settings"
+    ttl = f"PRD in class-conditional task on Concept '{concept}'"
     if title_suffix:
         ttl += f" {title_suffix}"
-    fig.suptitle(ttl, y=1.05, fontsize=13)
-    fig.tight_layout()
+    fig.suptitle(ttl, y=1.05, fontsize=15)
+    fig.tight_layout(pad=0.6)
 
     gs_tag = "_".join([f"{float(g):g}" for g in Gs])
-    out_png = save_dir / f"prd_{concept}_panel_g{gs_tag}.png"
-    out_pdf = save_dir / f"prd_{concept}_panel_g{gs_tag}.pdf"
+    out_png = save_dir / f"prd_{concept}_panel_cfg{gs_tag}.png"
+    out_pdf = save_dir / f"prd_{concept}_panel_cfg{gs_tag}.pdf"
     fig.savefig(out_png, dpi=600, bbox_inches="tight")
     fig.savefig(out_pdf, bbox_inches="tight")
     print(f"[SAVE] {out_png}")
@@ -236,7 +230,7 @@ def plot_guidances_panel(
 
     if summary_rows:
         df_sum = pd.DataFrame(summary_rows)
-        out_csv = save_dir / f"summary_{concept}_panel_g{gs_tag}.csv"
+        out_csv = save_dir / f"summary_{concept}_panel_cfg{gs_tag}.csv"
         df_sum.to_csv(out_csv, index=False)
         print(f"[SAVE] {out_csv}")
 
@@ -255,26 +249,26 @@ def _parse_pair(s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outputs_root", type=Path, default=None,
-                    help="如 outputs/（会寻找 {method}_{concept}/eval/exp1_<g>_<concept>.csv）")
+                    help="like outputs/; expects {method}_{concept}/eval/exp1_<g>_<concept>.csv")
     ap.add_argument("--methods", type=str, default="",
-                    help="逗号分隔的方法名（与 {method}_{concept} 前缀一致）")
+                    help="comma-separated method names (prefix in {method}_{concept})")
     ap.add_argument("--files", type=str, default="",
-                    help="逗号分隔的 CSV 路径或 eval 目录路径；与 --labels 一一对应")
+                    help="comma-separated CSV paths or eval dirs; pairs with --labels")
     ap.add_argument("--labels", type=str, default="",
-                    help="逗号分隔的图例名称，留空则用方法名/文件名")
+                    help="comma-separated legend labels; default uses method names")
 
     ap.add_argument("--concept", type=str, required=True)
     ap.add_argument("--guidances", type=str, required=True,
-                    help="逗号分隔，如 '3.0,5.0,7.5'")
+                    help="comma-separated, e.g. '3.0,5.0,7.5'")
     ap.add_argument("--save_dir", type=Path, default=None,
-                    help="输出目录；默认 outputs_root/{concept}_exp1/plots 或 files 的上层/plots")
-    ap.add_argument("--xlim", type=str, default="", help="如 '0,0.25'（可选）")
-    ap.add_argument("--ylim", type=str, default="", help="如 '0.6,1.0'（可选）")
-    ap.add_argument("--title_suffix", type=str, default="", help="标题后缀（可选）")
+                    help="output dir; default is outputs_root/{concept}_exp1/plots or the parent of --files plus /plots")
+    ap.add_argument("--xlim", type=str, default="", help="e.g. '0,0.25' (optional)")
+    ap.add_argument("--ylim", type=str, default="", help="e.g. '0.6,1.0' (optional)")
+    ap.add_argument("--title_suffix", type=str, default="", help="optional title suffix")
     ap.add_argument("--legend_loc", type=str, default="lower left",
-                    help="每个子图图例位置，例如 'lower left' / 'upper right' 等")
+                    help="legend location per subplot")
     ap.add_argument("--font-path", type=str, default="",
-                    help="Times New Roman 的 .ttf 路径（可选）")
+                    help="path to a .ttf for Times New Roman (optional)")
 
     args = ap.parse_args()
     _ensure_font(args.font_path, verbose=True)

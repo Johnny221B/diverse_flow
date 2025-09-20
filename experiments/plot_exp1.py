@@ -229,7 +229,7 @@ def plot_guidances_panel(
     ttl = f"PRD in class-conditional task on Concept '{concept}'"
     if title_suffix:
         ttl += f" {title_suffix}"
-    fig.suptitle(ttl, y=1.05, fontsize=20)  # 增加总标题字号
+    fig.suptitle(ttl, y=0.90, fontsize=20)  # 增加总标题字号
     
     # 增加tight_layout的padding以适应更大的字体
     fig.tight_layout(pad=1.0)

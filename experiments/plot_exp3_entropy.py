@@ -135,7 +135,7 @@ def _facet_bars(
 
         ax.bar(xs, ys, color=cols, width=0.65)
         if show_error and len(xs):
-            ax.errorbar(xs, ys, yerr=es, fmt="none", ecolor="black", elinewidth=1, capsize=3, capthick=1)
+            ax.errorbar(xs, ys, yerr=es, fmt="none", ecolor="black", elinewidth=1, capsize=4, capthick=1)
 
         if annotate and len(xs):
             for x, y, s in zip(xs, ys, es):
@@ -154,7 +154,7 @@ def _facet_bars(
     axes[0].set_ylabel("Normalized Entropy ($H/\\log K$)")
     if title is None:
         title = f"Normalized Entropy for the '{concept}' Concept"
-    fig.suptitle(title, y=0.94, fontsize=14)
+    fig.suptitle(title, y=0.94, fontsize=15)
 
     if show_legend and legend_handles:
         fig.legend(
@@ -193,12 +193,12 @@ def _heatmap(df, concept, methods, guidances, title=None, annotate=True, annot_f
                 if np.isnan(mu): continue
                 ax.text(j, i, annot_fmt.format(mu, sd),
                         ha="center", va="center",
-                        color=("white" if mu>0.5 else "black"), fontsize=9)
+                        color=("white" if mu>0.5 else "black"), fontsize=10)
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.ax.set_ylabel("Mean entropy", rotation=90)
 
-    ax.set_title(title or f"Normalized entropy heatmap | concept={concept}", fontsize=12)
+    ax.set_title(title or f"Normalized entropy heatmap | concept={concept}", fontsize=15)
     fig.tight_layout()
     return fig
 
@@ -228,7 +228,7 @@ def _dumbbell(df, concept, methods, guidances, title=None, show_error=True, anno
                             elinewidth=1.6, capsize=3, capthick=1.6, zorder=2)
             if annotate:
                 ax.text(x + (sd if show_error else 0) + 0.015, y_pos[i],
-                        annot_fmt.format(x, sd), va="center", ha="left", fontsize=9)
+                        annot_fmt.format(x, sd), va="center", ha="left", fontsize=10)
 
     ax.set_yticks(y_pos); ax.set_yticklabels([_norm_method_label(m) for m in methods_order])  # normalize names
     ax.set_xlabel("Normalized entropy (H / log K)")

@@ -45,6 +45,15 @@ def _ensure_font(font_path=None, verbose=True):
     mpl.rcParams["pdf.fonttype"] = 42
     mpl.rcParams["ps.fonttype"]  = 42
     mpl.rcParams["axes.unicode_minus"] = False
+    
+    # 增加字体大小设置
+    mpl.rcParams["font.size"] = 12        # 全局默认字体大小
+    mpl.rcParams["axes.titlesize"] = 25   # 子图标题大小
+    mpl.rcParams["axes.labelsize"] = 20   # 坐标轴标签大小
+    mpl.rcParams["xtick.labelsize"] = 15  # x轴刻度标签大小
+    mpl.rcParams["ytick.labelsize"] = 15  # y轴刻度标签大小
+    mpl.rcParams["legend.fontsize"] = 15  # 图例字体大小
+    
     if verbose:
         print(f"[INFO] Using font family: {picked}")
 
@@ -154,7 +163,8 @@ def plot_guidances_panel(
     base_colors = plt.get_cmap("tab10").colors
     color_map = {m: base_colors[i % len(base_colors)] for i, m in enumerate(methods)}
 
-    fig, axes = plt.subplots(1, n, figsize=(3.3*n + 2.0, 3.2), sharex=True, sharey=True)
+    # 增加图形高度以适应更大的字体
+    fig, axes = plt.subplots(1, n, figsize=(3.3*n + 2.0, 3.5), sharex=True, sharey=True)
     axes = [axes] if n == 1 else list(axes)
 
     summary_rows = []
@@ -205,20 +215,24 @@ def plot_guidances_panel(
         ax.grid(True, ls="--", alpha=0.35)
         if xlim: ax.set_xlim(*xlim)
         if ylim: ax.set_ylim(*ylim)
-        ax.set_title(f"CFG={float(g):.1f}", fontsize=11)  # <-- changed from guidance= to CFG=
+        ax.set_title(f"CFG={float(g):.1f}", fontsize=18)  # 增加子图标题字号
 
         if handles:
-            leg = ax.legend(handles, leg_labels, loc=legend_loc, frameon=True, fontsize=9)
+            leg = ax.legend(handles, leg_labels, loc=legend_loc, frameon=True, fontsize=10)
             for lh in leg.legend_handles:
                 lh.set_linewidth(2)
 
-    fig.supxlabel("Recall")
-    fig.supylabel("Precision")
+    # 增加坐标轴标签字号
+    fig.supxlabel("Recall", fontsize=15)
+    fig.supylabel("Precision", fontsize=15)
+    
     ttl = f"PRD in class-conditional task on Concept '{concept}'"
     if title_suffix:
         ttl += f" {title_suffix}"
-    fig.suptitle(ttl, y=1.05, fontsize=15)
-    fig.tight_layout(pad=0.6)
+    fig.suptitle(ttl, y=1.05, fontsize=20)  # 增加总标题字号
+    
+    # 增加tight_layout的padding以适应更大的字体
+    fig.tight_layout(pad=1.0)
 
     gs_tag = "_".join([f"{float(g):g}" for g in Gs])
     out_png = save_dir / f"prd_{concept}_panel_cfg{gs_tag}.png"

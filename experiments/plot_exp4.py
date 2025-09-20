@@ -100,6 +100,17 @@ def _format_method_label(method: str) -> str:
 
 # ---------- plotting ----------
 def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.png", method_styles: dict | None=None):
+    # 设置全局字体大小
+    plt.rcParams.update({
+        'font.size': 12,
+        'axes.titlesize': 14,
+        'axes.labelsize': 13,
+        'xtick.labelsize': 11,
+        'ytick.labelsize': 11,
+        'legend.fontsize': 11,
+        'figure.titlesize': 15
+    })
+    
     order, type_order, attrs_by_type = collect_order_union(method_to_data)
     cmap = plt.get_cmap('tab10')
     type_colors  = {t: cmap(i % 10) for i, t in enumerate(type_order)}
@@ -113,7 +124,8 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
     bar_width = min(0.82 / M, 0.28)
     offsets = [(i - (M-1)/2) * bar_width for i in range(M)]
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # 增加图形尺寸以适应更大的字体
+    fig, ax = plt.subplots(figsize=(14, 7))
 
     if score_type.upper() == "DIM":
         y_min, y_max = -0.40, 0.60
@@ -156,22 +168,33 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
 
     ax.axhline(0, color='gray', linewidth=0.8, linestyle='--', alpha=0.8)
     ax.set_ylim(y_min, y_max)
-    ax.set_ylabel(score_type)
-    ax.set_xlabel('Attributes')
-    ax.set_title(f'{score_type}: multi-method comparison')
+    ax.set_ylabel(score_type, fontsize=15)
+    ax.set_xlabel('Attributes', fontsize=15)
+    ax.set_title(f'{score_type}: multi-method comparison', fontsize=14)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=0, ha='center', linespacing=0.9)
-    ax.tick_params(axis='x', labelsize=8)
+    ax.set_xticklabels(labels, rotation=0, ha='center', linespacing=0.9, fontsize=12)
+    ax.tick_params(axis='x', labelsize=11)
 
     for tick_label, c in zip(ax.get_xticklabels(), [type_colors[t] for (t, a) in order]):
         tick_label.set_color(c)
 
-    ax.legend(handles=handles, title="Method", ncol=min(len(methods), 4), frameon=True, loc=legend_loc)
-    fig.tight_layout()
+    ax.legend(handles=handles, title="Method", ncol=min(len(methods), 4), frameon=True, loc=legend_loc, fontsize=14)
+    fig.tight_layout(pad=2.0)
+    
+    # 保存PNG和PDF版本
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=220, bbox_inches='tight')
+    
+    # 保存PNG
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    # 保存PDF版本
+    pdf_path = str(save_path).replace('.png', '.pdf')
+    plt.savefig(pdf_path, bbox_inches='tight', format='pdf')
+    
     plt.close(fig)
+    print(f"[OK] saved: {save_path}")
+    print(f"[OK] saved PDF: {pdf_path}")
 
 # ---------- CLI ----------
 def main():
@@ -202,7 +225,6 @@ def main():
     save_path = Path(args.save_dir) / f"{args.concept}_{args.score_type.upper()}.png"
     method_styles = parse_style_map(args.styles)
     plot_scores_multi(method_to_data, score_type=args.score_type.upper(), save_path=str(save_path), method_styles=method_styles)
-    print(f"[OK] saved: {save_path.resolve()}")
 
 if __name__ == "__main__":
     main()

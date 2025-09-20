@@ -140,7 +140,7 @@ def plot_cov_tau_panel(
         try:
             df = _read_one_guidance_df(outputs_root, concept, methods, g)
         except (FileNotFoundError, ValueError) as e:
-            ax.set_title(f"CFG={float(g):.1f}\n(no data)", fontsize=11)
+            ax.set_title(f"CFG={float(g):.1f}\n(no data)", fontsize=13)
             ax.set_xlim(tau_min, tau_max)
             ax.set_ylim(0.0, 0.6)
             ax.grid(True, alpha=0.3, ls="--")
@@ -176,7 +176,7 @@ def plot_cov_tau_panel(
         ax.set_xlim(tau_min, tau_max)
         ax.set_ylim(0.0, 0.6)  # <-- y-limit as requested
         ax.grid(True, alpha=0.3, ls="--")
-        ax.set_title(f"CFG={float(g):.1f}", fontsize=11)
+        ax.set_title(f"CFG={float(g):.1f}", fontsize=13)
 
         if idx == mid_idx:
             ax.set_xlabel(r"Threshold $\tau$")
@@ -191,7 +191,7 @@ def plot_cov_tau_panel(
     # Title higher
     if title is None:
         title = f"Mode Coverage vs. Threshold ($\\tau$) for the '{concept}' Concept"
-    fig.suptitle(title, y=0.90, fontsize=14)
+    fig.suptitle(title, y=0.90, fontsize=16)
 
     # Legend: single row centered between title and subplots
     fig.legend(

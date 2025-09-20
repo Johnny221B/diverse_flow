@@ -1,22 +1,35 @@
-# We'll create a new evaluator script that:
-# - Accepts multiple methods (e.g., "our,pg,cads,dpp") and an outputs root
-# - Discovers per-method, per-step seed folders like outputs/{method}_NFE/imgs/seed{seed}_steps{steps}/
-# - Computes metrics for each seed folder (reusing your metric functions)
-# - Aggregates across seeds for the same (method, steps) to mean/std
-# - Writes a CSV to outputs/results/aggregate_metrics.csv
-# - Optionally also writes per-seed JSONs like your original (kept behavior)
-#
-# I’ll copy your metric implementations and adapt the CLI & grouping/aggregation logic.
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Aggregate evaluation across seeds per method & steps.
+- Expects generated images in: outputs/{method}_NFE/imgs/seed{seed}_steps{steps}/img_***.png
+- Computes metrics per seed-folder, then aggregates per (method, steps) => mean/std.
+- Saves CSV: outputs/results/aggregate_metrics.csv
+- Optional: save per-seed JSONs under outputs/{method}_NFE/eval/.
 
+More robust discovery:
+- Recursively searches under .../{method}_NFE/imgs/** for any directory whose name matches:
+    seed{seed}_steps{steps}
+  and tolerant variants (case-insensitive, underscores/dashes allowed):
+    seed_111_steps_10, seed-111-steps-10, SEED111_STEPS10 ...
+- Helpful debug printouts when nothing is found.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+import os
+import re
+import sys
 from pathlib import Path
-import os, json, csv, argparse, re, sys, math, time
 from typing import Dict, List, Optional, Any, Tuple
-import numpy as np
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from PIL import Image
 from tqdm import tqdm
 import torchvision.transforms as T
@@ -44,11 +57,15 @@ except Exception:
     image_utils = None
     vendi = None
 
-
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+# -------------------------------
+# IO helpers & discovery
+# -------------------------------
 
 def list_images(dir_path: Path) -> List[Path]:
     return sorted([p for p in dir_path.rglob("*") if p.suffix.lower() in IMG_EXTS])
+
 
 def load_pils(paths: List[Path]) -> List[Image.Image]:
     imgs = []
@@ -59,16 +76,53 @@ def load_pils(paths: List[Path]) -> List[Image.Image]:
             print(f"Warning: Could not load image {p}, skipping.")
     return imgs
 
-def _nan_to_none(obj):
-    if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
-        return None
-    if isinstance(obj, dict):
-        return {k: _nan_to_none(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_nan_to_none(v) for v in obj]
-    return obj
 
-# ---------------- Vendi ----------------
+_seed_steps_rx = re.compile(r"(?i)^seed[_-]?(\d+)[_-]*steps?[_-]?(\d+)$")
+
+
+def parse_seed_steps(folder_name: str) -> Optional[Tuple[int, int]]:
+    m = _seed_steps_rx.match(folder_name)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def discover_seed_step_folders(method_root_imgs: Path, debug_list: bool = False) -> Dict[int, List[Path]]:
+    """Return mapping: steps -> list of seed folders.
+    Robust: recursively search for directories named like seed{seed}_steps{steps} (tolerant regex).
+    """
+    mapping: Dict[int, List[Path]] = {}
+    if not method_root_imgs.exists():
+        return mapping
+
+    # Collect all candidate dirs whose basename matches the pattern
+    candidates: List[Path] = []
+    for p in method_root_imgs.rglob("*"):
+        if p.is_dir() and _seed_steps_rx.match(p.name):
+            candidates.append(p)
+
+    if not candidates and debug_list:
+        # print one level listing to help diagnose
+        try:
+            children = [c.name for c in method_root_imgs.iterdir()]
+        except Exception:
+            children = []
+        print(f"[DEBUG] No seed-steps dirs directly under: {method_root_imgs}")
+        print(f"[DEBUG] Children: {children[:50]}")
+
+    for sub in sorted(candidates):
+        parsed = parse_seed_steps(sub.name)
+        if not parsed:
+            continue
+        seed, steps = parsed
+        mapping.setdefault(steps, []).append(sub)
+    return mapping
+
+
+# -------------------------------
+# Vendi score
+# -------------------------------
+
 def _embedding_vendi_score_fallback(imgs: List[Image.Image], device: str = "cuda") -> float:
     import torchvision
     from torchvision.models import Inception_V3_Weights
@@ -90,16 +144,14 @@ def _embedding_vendi_score_fallback(imgs: List[Image.Image], device: str = "cuda
             f = F.normalize(f, dim=1)
             feats.append(f.cpu())
     X = torch.cat(feats, dim=0).numpy()
-    # If vendi is unavailable, fallback to simple entropy-like proxy
     if vendi is None:
-        # cosine sim matrix entropy proxy
         S = X @ X.T
         S = (S - S.min()) / (S.max() - S.min() + 1e-8)
-        # entropy of average row
         p = (S.mean(axis=1) + 1e-8)
         p = p / p.sum()
         return float(-(p * np.log(p + 1e-8)).sum())
     return float(vendi.score_dual(X, normalize=False))
+
 
 def compute_vendi_for_images(imgs: List[Image.Image], device: str = "cuda") -> Dict[str, Optional[float]]:
     pix_vs = None
@@ -110,16 +162,21 @@ def compute_vendi_for_images(imgs: List[Image.Image], device: str = "cuda") -> D
             pix_vs = None
     try:
         emb_vs = float(image_utils.embedding_vendi_score(imgs, device=device)) if image_utils is not None else _embedding_vendi_score_fallback(imgs, device=device)
-    except Exception as e:
+    except Exception:
         emb_vs = _embedding_vendi_score_fallback(imgs, device=device)
     return {"vendi_pixel": pix_vs, "vendi_inception": emb_vs}
 
-# ---------------- Inception features ----------------
+
+# -------------------------------
+# Inception features (FID/KID)
+# -------------------------------
+
 def _build_inception_extractor(device: torch.device):
     if piq is None or InceptionV3 is None:
         print("Warning: piq not installed; FID/KID will be skipped.")
         return None
     return InceptionV3().to(device)
+
 
 def _extract_inception_features(
     image_paths: List[Path],
@@ -163,6 +220,7 @@ def _extract_inception_features(
 
     return torch.cat(all_features, dim=0) if all_features else torch.empty(0, 2048)
 
+
 def compute_fid_from_features(real_features: torch.Tensor, fake_features: torch.Tensor) -> Optional[float]:
     if piq is None:
         return None
@@ -172,10 +230,15 @@ def compute_fid_from_features(real_features: torch.Tensor, fake_features: torch.
     value = fid_metric(real_features, fake_features)
     return float(value)
 
-# ---------------- KID ----------------
+
+# -------------------------------
+# === KID (Kernel Inception Distance) ===
+# -------------------------------
+
 def _poly_kernel(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     d = x.shape[1]
     return (x @ y.T / float(d) + 1.0) ** 3
+
 
 def compute_kid_from_features(
     real_features: torch.Tensor,
@@ -227,22 +290,28 @@ def compute_kid_from_features(
     kid_std  = float(stats.std(ddof=1)) if stats.size > 1 else 0.0
     return kid_mean, kid_std
 
-# ---------------- CLIP score ----------------
+
+# -------------------------------
+# CLIP score (OpenAI JIT)
+# -------------------------------
+
 def load_clip_from_jit(jit_path: Path):
     model = torch.jit.load(str(jit_path), map_location="cpu").eval()
     return model
 
+
 def calculate_clip_score(
     image_folder: Path,
     model: Any,
-    preprocess: T.Compose,
+    preprocess: T.Compose,                 # kept for signature compatibility (unused)
     device: torch.device,
     batch_size: int,
-    tokenizer=None,
-    is_openclip: bool = False,
-    clip_image_size: int = 224,
+    tokenizer=None,                        # if None, try open_clip.tokenize then clip.tokenize
+    is_openclip: bool = False,             # kept for signature compatibility (unused)
+    clip_image_size: int = 224,            # align with pipeline cfg.clip_image_size
 ) -> Optional[float]:
     prompt = image_folder.name.replace('_', ' ').replace('-', ' ')
+
     if tokenizer is None:
         tok = None
         try:
@@ -270,6 +339,7 @@ def calculate_clip_score(
 
     mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=device).view(1, 3, 1, 1)
     std  = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=device).view(1, 3, 1, 1)
+
     to_tensor = T.ToTensor()
     all_scores: List[float] = []
 
@@ -287,7 +357,10 @@ def calculate_clip_score(
 
             x = torch.stack(imgs, dim=0).to(device=device, dtype=torch.float32)
             if x.shape[-2:] != (clip_image_size, clip_image_size):
-                x = F.interpolate(x, size=(clip_image_size, clip_image_size), mode="bilinear", align_corners=False, antialias=True)
+                x = F.interpolate(
+                    x, size=(clip_image_size, clip_image_size),
+                    mode="bilinear", align_corners=False, antialias=True
+                )
             x = (x - mean) / std
 
             image_features = model.encode_image(x)
@@ -297,7 +370,11 @@ def calculate_clip_score(
 
     return float(np.mean(all_scores)) if all_scores else None
 
-# ---------------- MS-SSIM ----------------
+
+# -------------------------------
+# MS-SSIM diversity & BRISQUE
+# -------------------------------
+
 def calculate_ms_ssim_diversity(image_folder: Path, max_pairs: int = 100) -> Optional[float]:
     paths = list(image_folder.rglob("*.jpg")) + list(image_folder.rglob("*.png"))
     if len(paths) < 2:
@@ -332,7 +409,7 @@ def calculate_ms_ssim_diversity(image_folder: Path, max_pairs: int = 100) -> Opt
         return None
     return float(1.0 - np.mean(scores))
 
-# ---------------- BRISQUE ----------------
+
 def calculate_brisque_quality(image_folder: Path, device: torch.device) -> Optional[float]:
     if piq is None:
         print("piq not installed; BRISQUE will be skipped.")
@@ -359,7 +436,37 @@ def calculate_brisque_quality(image_folder: Path, device: torch.device) -> Optio
         return None
     return float(np.mean(scores))
 
-# ---------------- Evaluation core ----------------
+
+# -------------------------------
+# Utilities
+# -------------------------------
+
+def _nan_to_none(obj):
+    if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _nan_to_none(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_nan_to_none(v) for v in obj]
+    return obj
+
+
+# -------------------------------
+# Evaluation core
+# -------------------------------
+
+def _build_inception(device: torch.device):
+    if piq is None or InceptionV3 is None:
+        return None
+    return InceptionV3().to(device)
+
+
+def _extract_features(paths: List[Path], extractor, device, num_workers, batch_size):
+    if extractor is None:
+        return None
+    return _extract_inception_features(paths, extractor, device, num_workers=num_workers, batch_size=batch_size)
+
+
 def eval_seed_folder(gen_dir: Path, device: torch.device, inception, real_features, args) -> Dict[str, Optional[float]]:
     paths = list_images(gen_dir)
     if not paths:
@@ -375,9 +482,7 @@ def eval_seed_folder(gen_dir: Path, device: torch.device, inception, real_featur
     fid_value = None
     kid_mean, kid_std = None, None
     if inception is not None and real_features is not None and real_features.numel() > 0:
-        fake_features = _extract_inception_features(
-            paths, inception, device, num_workers=args.num_workers, batch_size=args.batch_size
-        )
+        fake_features = _extract_features(paths, inception, device, args.num_workers, args.batch_size)
         fid_value = compute_fid_from_features(real_features, fake_features)
         if args.kid_subsets > 0 and fake_features is not None and fake_features.numel() > 0:
             rng = np.random.default_rng(abs(hash(gen_dir.name)) % (2**32))
@@ -406,8 +511,8 @@ def eval_seed_folder(gen_dir: Path, device: torch.device, inception, real_featur
         "brisque": brisque_quality,
     }
 
+
 def aggregate_mean_std(per_seed_metrics: List[Dict[str, Optional[float]]]) -> Dict[str, Dict[str, Optional[float]]]:
-    # compute mean/std for each numeric metric across seeds
     keys = set().union(*[m.keys() for m in per_seed_metrics]) if per_seed_metrics else set()
     agg = {}
     for k in keys:
@@ -419,25 +524,10 @@ def aggregate_mean_std(per_seed_metrics: List[Dict[str, Optional[float]]]) -> Di
             agg[k] = {"mean": None, "std": None, "count": 0}
     return agg
 
-def parse_seed_steps(folder_name: str) -> Optional[Tuple[int, int]]:
-    # expect names like seed{seed}_steps{steps}
-    m = re.match(r"seed(\\d+)_steps(\\d+)", folder_name)
-    if not m:
-        return None
-    return int(m.group(1)), int(m.group(2))
 
-def discover_seed_step_folders(method_root_imgs: Path) -> Dict[int, List[Path]]:
-    # returns mapping: steps -> list of seed folder Paths
-    mapping: Dict[int, List[Path]] = {}
-    for sub in sorted(method_root_imgs.iterdir() if method_root_imgs.exists() else []):
-        if not sub.is_dir():
-            continue
-        parsed = parse_seed_steps(sub.name)
-        if not parsed:
-            continue
-        seed, steps = parsed
-        mapping.setdefault(steps, []).append(sub)
-    return mapping
+# -------------------------------
+# Main
+# -------------------------------
 
 def main():
     ap = argparse.ArgumentParser(description="Aggregate metrics across seeds per method & steps.")
@@ -453,7 +543,8 @@ def main():
     ap.add_argument("--kid-subset-size", type=int, default=64)
     ap.add_argument("--kid-subsets", type=int, default=20)
     ap.add_argument("--save-per-seed-json", action="store_true", help="Also save per-seed JSON under each method's eval/")
-    args = ap.parse_args(args=None)
+    ap.add_argument("--debug-list", action="store_true", help="Print immediate children of imgs/ when nothing is found")
+    args = ap.parse_args()
 
     device = torch.device(args.device if ("cuda" in args.device and torch.cuda.is_available()) else "cpu")
     outputs_root = Path(args.outputs_root)
@@ -482,9 +573,8 @@ def main():
         except Exception as e:
             print(f"Failed to load CLIP JIT: {e}")
 
-    # Iterate methods
     methods = [m.strip() for m in args.methods.split(",") if m.strip()]
-    rows = []  # for CSV aggregation
+    rows = []
 
     for method in methods:
         method_root = outputs_root / f"{method}_NFE"
@@ -493,10 +583,17 @@ def main():
         imgs_root.mkdir(parents=True, exist_ok=True)
         eval_root.mkdir(parents=True, exist_ok=True)
 
-        step_to_seeds = discover_seed_step_folders(imgs_root)
+        step_to_seeds = discover_seed_step_folders(imgs_root, debug_list=args.debug_list)
         if not step_to_seeds:
             print(f"[WARN] No seed-step folders found for method={method} under {imgs_root}")
-            continue
+            # Extra heuristic: look one more level (some older runs may have prompt slug under imgs)
+            for sub in imgs_root.iterdir():
+                if sub.is_dir():
+                    nested = discover_seed_step_folders(sub, debug_list=args.debug_list)
+                    for k, v in nested.items():
+                        step_to_seeds.setdefault(k, []).extend(v)
+            if not step_to_seeds:
+                continue
 
         for steps, seed_dirs in sorted(step_to_seeds.items()):
             per_seed_metrics = []
@@ -507,7 +604,6 @@ def main():
                 per_seed_metrics.append(m)
 
                 if args.save_per_seed_json:
-                    # Save per-seed JSON under method eval/
                     payload = {
                         "real_root": str(real_dir),
                         "device": str(device),
@@ -523,7 +619,6 @@ def main():
 
             agg = aggregate_mean_std(per_seed_metrics)
 
-            # Build a flat CSV row
             flat = {
                 "method": method,
                 "steps": int(steps),
@@ -551,13 +646,14 @@ def main():
 
     # Write CSV
     csv_path = results_dir / "aggregate_metrics.csv"
-    fieldnames = list(rows[0].keys()) if rows else ["method","steps","seeds"]
+    fieldnames = list(rows[0].keys()) if rows else ["method", "steps", "seeds"]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in rows:
-            w.writerow({k: ("" if (v is None or (isinstance(v,float) and (math.isnan(v) or math.isinf(v)))) else v) for k,v in r.items()})
+            w.writerow({k: ("" if (v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))) else v) for k, v in r.items()})
     print(f"[OK] Saved aggregate CSV: {csv_path}")
+
 
 if __name__ == "__main__":
     main()

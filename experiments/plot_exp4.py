@@ -168,13 +168,13 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
 
     ax.axhline(0, color='gray', linewidth=0.8, linestyle='--', alpha=0.8)
     ax.set_ylim(y_min, y_max)
-    ax.set_ylabel(score_type, fontsize=15)
-    ax.set_xlabel('Attributes', fontsize=15)
-    ax.set_title(f'{score_type}: multi-method comparison', fontsize=14)
+    ax.set_ylabel(score_type, fontsize=18)
+    ax.set_xlabel('Attributes', fontsize=18)
+    ax.set_title(f'{score_type}: multi-method comparison', fontsize=18)
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=0, ha='center', linespacing=0.9, fontsize=12)
-    ax.tick_params(axis='x', labelsize=11)
+    ax.tick_params(axis='x', labelsize=12)
 
     for tick_label, c in zip(ax.get_xticklabels(), [type_colors[t] for (t, a) in order]):
         tick_label.set_color(c)

@@ -1,254 +1,310 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# 6 子图（2 行 × 3 列）：一行 Baseline，一行 OSCAR-balanced；
+# 三列分别展示 early / mid / final 三个时间点。
+# - 同一批 z0~N(0,I)，同步数、同一模型、同一目标分布（3x3 GMM）
+# - 连线使用“自适应透明度”（按起点局部密度；越拥挤越透明）
+# - 隐藏坐标轴数字；红色“+”为 GMM 均值
 
-"""
-2D Flow Comparison (静态两幅图，带箭头与“往外推”的过程感)
-
-你将得到两张并排子图（保存到 outputs/<method>_toy/imgs/）：
-- 左：Flow Matching
-- 右：Our Method（更分散）
-
-可视化要点：
-- 不画 GMM 网格；用一个大圆圈代表目标分布的边界（点都在圆内运动）。
-- 同一批初始点（数量一致），两幅图完全可比。
-- 用箭头显示从起点到终点的“外推”方向；并用稀疏的中间轨迹点增强“运动感”。
-- 背景采用柔和的红色径向底图（而不是纯白），再叠加大圆圈边界。
-
-运行示例：
-python visualize_push_arrows.py --K 600 --steps 80 --radius 3.0 --n-arrows 120 --seed 0 --method toy2d
-"""
-
-import os, math, argparse, random, time
-from typing import Tuple
+import os, math, random
+from typing import Optional, Tuple
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+import matplotlib as mpl
 
-# --------- utils ---------
-def _log(s): print(f"[{time.strftime('%H:%M:%S')}] {s}", flush=True)
-def set_seed(seed=0):
-    torch.manual_seed(seed); np.random.seed(seed); random.seed(seed)
+# mpl.rcParams['axes.titlesize'] = 18
 
-def _angle_wrap(a):
-    """wrap angle to [-pi, pi]"""
-    return (a + np.pi) % (2*np.pi) - np.pi
+# ---------------- Utils ----------------
+def set_seed(s=0):
+    torch.manual_seed(s); np.random.seed(s); random.seed(s)
 
-def _to_numpy(t):
-    return t.detach().cpu().numpy()
+def project_partial_orth(grad: torch.Tensor, v: Optional[torch.Tensor], alpha: float):
+    if v is None: return grad
+    v_flat = v.view(v.size(0), -1)
+    g_flat = grad.view(grad.size(0), -1)
+    v2 = (v_flat*v_flat).sum(dim=1, keepdim=True) + 1e-12
+    coef = ((g_flat*v_flat).sum(dim=1, keepdim=True))/v2
+    parallel = coef * v_flat
+    return (g_flat - alpha * parallel).view_as(grad)
 
-# --------- toy dynamics (无需训练，直接构造流) ---------
+def rotate90(v: torch.Tensor):
+    """2D 旋转 +90°：(x,y)->(-y,x)"""
+    return torch.stack([-v[...,1], v[...,0]], dim=-1)
+
+# ---------------- Data: one GMM ----------------
+class GMM2D:
+    def __init__(self, means, sigma=0.22, weights=None):
+        self.means = torch.as_tensor(means, dtype=torch.float32)
+        self.sigma = float(sigma)
+        K = self.means.shape[0]
+        self.weights = torch.ones(K)/K if weights is None else torch.as_tensor(weights, dtype=torch.float32)
+        self.K = K
+    @staticmethod
+    def grid(grid=3, span=(-2,2), sigma=0.22):
+        xs = np.linspace(span[0], span[1], grid)
+        mus = np.array([(x,y) for y in xs for x in xs], dtype=np.float32)
+        w = np.ones(mus.shape[0], dtype=np.float32); w = w / w.sum()
+        return GMM2D(mus, sigma, w)
+    def sample(self, n, device=None):
+        idx = torch.multinomial(self.weights, n, replacement=True)
+        mu = self.means[idx]
+        x = mu + torch.randn(n,2)*self.sigma
+        if device is not None: x = x.to(device); idx = idx.to(device)
+        return x, idx
+
+# ---------------- Model: Tiny CFM ----------------
+class TinyCFM(nn.Module):
+    def __init__(self, K: int, hidden: int = 128):
+        super().__init__()
+        self.K = K
+        self.emb = nn.Linear(K, 32)
+        self.tproj = nn.Linear(1, 32)
+        self.net = nn.Sequential(
+            nn.Linear(2+32+32, hidden), nn.SiLU(),
+            nn.Linear(hidden, hidden), nn.SiLU(),
+            nn.Linear(hidden, 2),
+        )
+    def forward(self, xt, t, y_onehot):
+        h = torch.cat([xt, self.emb(y_onehot), self.tproj(t)], dim=-1)
+        return self.net(h)
+
+def fm_loss(model, x0, y_onehot, p_drop=0.2):
+    B = x0.shape[0]
+    z = torch.randn_like(x0)                 # 训练里 z~N(0,I)
+    t = torch.rand(B,1, device=x0.device)
+    xt = (1 - t)*z + t*x0
+    u  = x0 - z
+    drop = (torch.rand(B,1, device=x0.device) < p_drop).float()
+    y_used = (1 - drop)*y_onehot
+    u_hat = model(xt, t, y_used)
+    return F.mse_loss(u_hat, u)
+
+# ---------------- Repulsion & density ----------------
+def repulsive_grad_and_density(x: torch.Tensor, sigma_r: float = 0.28):
+    X = x.unsqueeze(1); Y = x.unsqueeze(0)
+    diff = X - Y
+    dist2 = (diff*diff).sum(-1)
+    w = torch.exp(-0.5*dist2/(sigma_r**2))
+    w = w - torch.diag(torch.diag(w))
+    g = (w.unsqueeze(-1)*diff).sum(dim=1) / (sigma_r**2)
+    dens = w.sum(dim=1)
+    return -g, dens
+
+# ---------------- Inference: Baseline FM ----------------
 @torch.no_grad()
-def simulate_flow_matching(z0: torch.Tensor, steps: int, R: float,
-                           k_rad: float = 4.0,
-                           k_attract: float = 2.5,
-                           theta_star: float = 0.0,
-                           noise_std: float = 0.02):
-    """
-    Flow Matching（基线）：
-    - 径向外推：把半径推向 R_target（略小于边界）
-    - 角向轻微吸引到固定角度 theta_star 对应的环上目标点 p*（导致“比较聚集”）
-    - 少量各向同性噪声
-    返回：所有时间的采样（用于画中间轨迹点）
-    """
-    device = z0.device
-    x = z0.clone()
-    T = steps
+def integrate_flowmatch(model, y_onehot, x0, steps: int):
+    n = y_onehot.size(0); dev = next(model.parameters()).device
+    x = x0.clone().to(dev)
+    ts = torch.linspace(0,1,steps+1, device=dev)
     traj = [x.clone()]
-    R_tgt = 0.82 * R
-    p_star = torch.tensor([R_tgt * math.cos(theta_star), R_tgt * math.sin(theta_star)], device=device)
+    for i in range(steps):
+        t0 = ts[i].expand(n,1)
+        u  = model(x, t0, y_onehot)
+        dt = float(ts[i+1]-ts[i])
+        x  = x + dt*u
+        traj.append(x.clone())
+    return x, torch.stack(traj, dim=0)   # [steps+1, n, 2]
 
-    for i in range(T):
-        r = torch.clamp(torch.norm(x, dim=1, keepdim=True), min=1e-6)
-        e_r = x / r
-        v_rad = k_rad * (R_tgt - r) * e_r                          # 径向弹簧
-        v_att = k_attract * (p_star.unsqueeze(0) - x)              # 朝单一扇区的吸引
-        v = v_rad + v_att
-        x = x + (1.0 / T) * v + noise_std * torch.randn_like(x)
-        # 保证在圆内（轻微反弹）
-        over = torch.norm(x, dim=1, keepdim=True) > R
-        if over.any():
-            x_over = x[over.squeeze(1)]
-            r_over = torch.norm(x_over, dim=1, keepdim=True)
-            x[over.squeeze(1)] = x_over * (R / r_over) * 0.995
+# ---------------- Inference: OSCAR-balanced ----------------
+@torch.no_grad()
+def integrate_oscar_balanced(
+    model, y_onehot, x0, steps: int, means: torch.Tensor, gmm_sigma: float,
+    gamma0: float = 0.22, t_gate: Tuple[float,float] = (0.18,0.85), sched_shape: str = 'sin2',
+    partial_ortho: float = 1.0, repel_sigma: float = 0.26, repulsion_weight: float = 1.1,
+    dens_alpha: float = 0.8, swirl_coef: float = 0.20,
+    gamma_max_ratio: float = 0.35, r_cut_mult: float = 1.0, dist_tau_mult: float = 0.40,
+    micro_every: int = 10, micro_step: float = 0.18, micro_iters: int = 1,
+):
+    dev = next(model.parameters()).device
+    n = y_onehot.size(0); x = x0.clone().to(dev)
+    ts = torch.linspace(0,1,steps+1, device=dev)
+    traj = [x.clone()]
+
+    def sched_factor(t_norm: float) -> float:
+        t0, t1 = t_gate
+        if not (t0 <= t_norm <= t1): return 0.0
+        u = (t_norm - t0) / max(t1 - t0, 1e-8)
+        return (math.sin(math.pi*min(max(u,0.0),1.0))**2) if sched_shape=='sin2' else (u*(1-u))
+
+    def micro_polish(X: torch.Tensor, r_min: float, step: float, iters: int = 1):
+        Y = X.clone()
+        for _ in range(iters):
+            D = torch.cdist(Y, Y); mask = (D > 0) & (D < r_min)
+            push = torch.zeros_like(Y)
+            for i in range(Y.size(0)):
+                idx = mask[i].nonzero(as_tuple=False).view(-1)
+                if idx.numel() == 0: continue
+                vecs = Y[i].unsqueeze(0) - Y[idx]
+                norms = vecs.norm(dim=1, keepdim=True) + 1e-12
+                push[i] = (vecs / norms).mean(dim=0)
+            Y = Y + step * 0.5 * r_min * push
+        return Y
+
+    for i in range(steps):
+        t0 = float(ts[i]); t1 = float(ts[i+1]); dt = t1 - t0
+        tvec = torch.full((n,1), t0, device=dev)
+        u = model(x, tvec, y_onehot)                 # 主干流
+        base_disp = dt * u
+
+        g_rep, dens = repulsive_grad_and_density(x, sigma_r=repel_sigma)
+        dens_scale = ((dens/(dens.mean()+1e-12)).clamp_min(1e-3)).pow(dens_alpha).view(-1,1)
+        dist = torch.cdist(x, means).min(dim=1).values
+        r_cut = r_cut_mult * max(float(repel_sigma), float(gmm_sigma))
+        gate_dist = torch.sigmoid((r_cut - dist) / (dist_tau_mult * r_cut + 1e-12)).view(-1,1)
+        g_rep = repulsion_weight * g_rep * dens_scale * gate_dist
+
+        g_perp  = project_partial_orth(g_rep, u, partial_ortho)
+        g_swirl = rotate90(g_perp) * swirl_coef
+        g_div   = project_partial_orth(g_perp + g_swirl, u, 1.0)
+
+        gamma    = gamma0 * sched_factor(t0)
+        div_disp = dt * gamma * g_div
+
+        # 信赖域：||div|| ≤ ratio * ||base||
+        bn_base = (base_disp.view(n,-1).norm(dim=1)+1e-12).view(-1,1)
+        bn_div  = (div_disp.view(n,-1).norm(dim=1)+1e-12).view(-1,1)
+        cap     = gamma_max_ratio * bn_base
+        scale   = torch.minimum(torch.ones_like(cap), cap / bn_div)
+        div_disp= scale * div_disp
+
+        x = x + base_disp + div_disp
+
+        if micro_every > 0 and (i+1) % micro_every == 0:
+            x = micro_polish(x, r_min=0.6*repel_sigma, step=micro_step, iters=micro_iters)
+
         traj.append(x.clone())
 
-    return torch.stack(traj, dim=0)  # [T+1, N, 2]
+    return x, torch.stack(traj, dim=0)   # [steps+1, n, 2]
 
-@torch.no_grad()
-def simulate_our_method(z0: torch.Tensor, steps: int, R: float,
-                        k_rad: float = 4.0,
-                        repulse_sigma: float = 0.6,
-                        repulse_scale: float = 2.0,
-                        noise_std: float = 0.02):
-    """
-    Our Method（更分散）：
-    - 同样的径向外推到 R_target
-    - 叠加 pairwise 斥力（让点沿环向彼此分散）
-    - 少量各向同性噪声
-    """
-    device = z0.device
-    x = z0.clone()
-    T = steps
-    traj = [x.clone()]
-    R_tgt = 0.82 * R
+# ---------------- Line alpha (adaptive) ----------------
+def _knn_stat(x0: torch.Tensor, k: int = 8, approx_max_n: int = 1500):
+    n = x0.size(0)
+    if n <= approx_max_n:
+        D = torch.cdist(x0, x0)
+        D = D + torch.eye(n, device=x0.device)*1e9
+        return D.topk(k, largest=False).values.mean(dim=1)
+    else:
+        M = min(512, n)
+        idx = torch.randperm(n, device=x0.device)[:M]
+        D = torch.cdist(x0, x0[idx])
+        return D.topk(min(k, M), largest=False).values.mean(dim=1)
 
-    for i in range(T):
-        r = torch.clamp(torch.norm(x, dim=1, keepdim=True), min=1e-6)
-        e_r = x / r
-        v_rad = k_rad * (R_tgt - r) * e_r
+def compute_line_alpha(x0: torch.Tensor, xT: torch.Tensor,
+                       mode: str = 'density', k: int = 8,
+                       min_alpha: float = 0.03, max_alpha: float = 0.45):
+    n = x0.size(0)
+    if mode == 'density':
+        knn = _knn_stat(x0, k=k)  # 大→稀疏，小→稠密
+        s = (knn - knn.min()) / (knn.max() - knn.min() + 1e-12)
+        a = min_alpha + (max_alpha - min_alpha) * s
+    elif mode == 'length':
+        L = (xT - x0).norm(dim=1)
+        s = (L - L.min()) / (L.max() - L.min() + 1e-12)
+        a = min_alpha + (max_alpha - min_alpha) * s
+    else:  # global
+        base = 0.4 * (200.0 / max(float(n), 200.0))**0.5
+        a = torch.full((n,), float(np.clip(base, min_alpha, max_alpha)), device=x0.device)
+    return a.clamp(min_alpha, max_alpha)
 
-        # 斥力（高斯核）：对拥挤更敏感，促使沿环向均匀分布
-        X = x.unsqueeze(1)                        # [N,1,2]
-        Y = x.unsqueeze(0)                        # [1,N,2]
-        diff = X - Y                              # [N,N,2]
-        dist2 = (diff * diff).sum(dim=-1)         # [N,N]
-        W = torch.exp(-0.5 * dist2 / (repulse_sigma ** 2))
-        W = W - torch.diag(torch.diag(W))         # 去掉 self
-        g_rep = -(W.unsqueeze(-1) * diff).sum(dim=1) / (repulse_sigma ** 2)  # -∇ϕ
-        v_rep = repulse_scale * g_rep / (x.size(0) ** 0.5)  # 缩放一下以免太强
+# ---------------- Plot helpers ----------------
+def draw_means(ax, means: torch.Tensor):
+    m = means.cpu().numpy()
+    ax.scatter(m[:,0], m[:,1], marker='+', s=60, c='red', alpha=0.9)
 
-        v = v_rad + v_rep
-        x = x + (1.0 / T) * v + noise_std * torch.randn_like(x)
+def subplot_snapshot(ax, x0: torch.Tensor, x_now: torch.Tensor,
+                     line_alpha_mode='density', max_lines: Optional[int]=None,
+                     min_alpha=0.02, max_alpha=0.40):
+    xi = x0.detach(); xT = x_now.detach()
+    n  = xi.size(0)
 
-        # 圆边界内
-        over = torch.norm(x, dim=1, keepdim=True) > R
-        if over.any():
-            x_over = x[over.squeeze(1)]
-            r_over = torch.norm(x_over, dim=1, keepdim=True)
-            x[over.squeeze(1)] = x_over * (R / r_over) * 0.995
+    # 初始点（浅色）
+    _xi = xi.cpu().numpy()
+    ax.scatter(_xi[:,0], _xi[:,1], s=9, alpha=0.26, marker='o')
 
-        traj.append(x.clone())
+    # 自适应透明度的连线（init -> current）
+    alphas = compute_line_alpha(xi, xT, mode=line_alpha_mode,
+                                min_alpha=min_alpha, max_alpha=max_alpha).cpu().numpy()
+    idxs = np.arange(n)
+    if (max_lines is not None) and (n > max_lines):
+        idxs = np.random.default_rng(0).choice(n, size=max_lines, replace=False)
+    segs = np.stack([xi[idxs].cpu().numpy(), xT[idxs].cpu().numpy()], axis=1)
+    cols = np.zeros((segs.shape[0],4), dtype=np.float32); cols[:,3] = alphas[idxs]
+    lc = LineCollection(segs, colors=cols, linewidths=0.7, linestyles='--', antialiased=True)
+    ax.add_collection(lc)
 
-    return torch.stack(traj, dim=0)  # [T+1, N, 2]
+    # 当前点
+    _xT = xT.cpu().numpy()
+    ax.scatter(_xT[:,0], _xT[:,1], s=14, alpha=0.95, marker='x')
 
-# --------- 背景与绘图 ---------
-def draw_radial_background(ax, R: float, res: int = 240):
-    """柔和红色径向底图 + 圆圈轮廓"""
-    xs = np.linspace(-R, R, res)
-    ys = np.linspace(-R, R, res)
-    X, Y = np.meshgrid(xs, ys)
-    Rg = np.sqrt(X**2 + Y**2)
-    # 径向背景：中心亮，边缘淡（更直观“往外推”）
-    Z = np.exp(-0.5 * (Rg / (0.75 * R))**2)
-    ax.imshow(Z, extent=[-R, R, -R, R], origin='lower', cmap='Reds', alpha=0.35, interpolation='bilinear')
-    # 圆圈边界
-    theta = np.linspace(0, 2*np.pi, 512)
-    ax.plot(R*np.cos(theta), R*np.sin(theta), color='red', linewidth=2.0, alpha=0.9)
+    ax.set_xlim(-3,3); ax.set_ylim(-3,3)
+    ax.set_aspect('equal', adjustable='box'); ax.grid(True, alpha=0.25)
+    ax.set_xticks([]); ax.set_yticks([])
 
-def format_axes(ax, title: str, R: float):
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_xlim(-R, R); ax.set_ylim(-R, R)
-    ax.set_xticks([]); ax.set_yticks([])  # 去掉网格与刻度
-    ax.set_title(title)
+# ---------------- Run (2 行 × 3 列：方法 × 时间) ----------------
+set_seed(0)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def plot_process_panel(ax, traj: torch.Tensor, R: float,
-                       arrow_idx: np.ndarray,
-                       trail_keyframes: int = 4,
-                       point_size: float = 6.0,
-                       arrow_width: float = 0.004):
-    """
-    画：背景 + 圆圈 + 全体终点 + 稀疏中间轨迹点 + 箭头（起点->终点）
-    """
-    draw_radial_background(ax, R)
-    T, N, _ = traj.shape
-    # 全体终点（半透明，突出总体散布）
-    final = traj[-1]
-    ax.scatter(_to_numpy(final[:,0]), _to_numpy(final[:,1]),
-               s=point_size, alpha=0.85, color='tab:blue', linewidths=0)
+# 目标分布 & 模型训练
+gmm   = GMM2D.grid(grid=3, sigma=0.22)
+means = gmm.means.to(device)
+model = TinyCFM(K=gmm.K, hidden=128).to(device)
+opt   = torch.optim.Adam(model.parameters(), lr=2e-3)
+for it in range(1800):
+    x0_b, idx = gmm.sample(512, device=device)
+    y_b = F.one_hot(idx, num_classes=gmm.K).float()
+    loss = fm_loss(model, x0_b, y_b, p_drop=0.2)
+    opt.zero_grad(); loss.backward(); opt.step()
 
-    # 稀疏关键中间帧（增强“向外运动”的感觉）
-    ks = np.linspace(0, T-1, trail_keyframes, dtype=int)
-    for j, k in enumerate(ks[:-1]):  # 不含最终帧
-        P = traj[k]
-        alpha = 0.25 * (j + 1) / (len(ks)) + 0.05
-        ax.scatter(_to_numpy(P[:,0]), _to_numpy(P[:,1]),
-                   s=point_size*0.7, alpha=alpha, color='tab:gray', linewidths=0)
+# 同一批初始点
+K_SAMPLES = 1200
+z0 = torch.randn(K_SAMPLES, 2, device=device)
+ids = torch.multinomial(gmm.weights.to(device), K_SAMPLES, replacement=True)
+y_onehot = F.one_hot(ids, num_classes=gmm.K).float()
 
-    # 箭头（子集，避免过度拥挤）
-    start = traj[0][arrow_idx]
-    end   = traj[-1][arrow_idx]
-    U = end - start
-    ax.quiver(_to_numpy(start[:,0]), _to_numpy(start[:,1]),
-              _to_numpy(U[:,0]), _to_numpy(U[:,1]),
-              angles='xy', scale_units='xy', scale=1.0,
-              width=arrow_width, headwidth=6, headlength=7,
-              color='black', alpha=0.9, zorder=5)
+# 推理（保留完整轨迹）
+STEPS = 2000
+x_base_final,  traj_base  = integrate_flowmatch(model, y_onehot, x0=z0, steps=STEPS)
+x_osc_final,   traj_oscar = integrate_oscar_balanced(
+    model, y_onehot, x0=z0, steps=STEPS, means=means, gmm_sigma=float(gmm.sigma),
+    gamma0=0.22, t_gate=(0.18,0.85), sched_shape='sin2',
+    partial_ortho=1.0, repel_sigma=0.26, repulsion_weight=1.1,
+    dens_alpha=0.8, swirl_coef=0.20,
+    gamma_max_ratio=0.35, r_cut_mult=1.0, dist_tau_mult=0.40,
+    micro_every=10, micro_step=0.18, micro_iters=1
+)
 
-# --------- 主程序 ---------
-def parse_args():
-    ap = argparse.ArgumentParser(description="2D Flow Comparison (arrows + big circle)")
-    ap.add_argument('--K', type=int, default=600, help='点的数量（两幅图一致）')
-    ap.add_argument('--steps', type=int, default=80, help='积分步数（越大轨迹越平滑）')
-    ap.add_argument('--radius', type=float, default=3.0, help='大圆半径 R')
-    ap.add_argument('--seed', type=int, default=0)
-    ap.add_argument('--n-arrows', type=int, default=120, help='每幅图绘制箭头的点数（从同一批点中子采样）')
-    ap.add_argument('--trail-keyframes', type=int, default=4, help='中间轨迹的关键帧数（不含最终帧）')
-    ap.add_argument('--method', type=str, default='toy2d')
-    ap.add_argument('--out', type=str, default=None,
-                    help='输出根目录；若不填，则保存到 outputs/<method>_toy/imgs/')
-    return ap.parse_args()
+# 选择三个快照（early / mid / final）
+snap_fracs   = (0.2, 0.6, 1.0)
+snap_indices = [min(int(f*STEPS), STEPS) for f in snap_fracs]
 
-def main():
-    args = parse_args()
-    set_seed(args.seed)
+# 2 行 × 3 列：第 1 行 Baseline；第 2 行 OSCAR
+out_dir = "/mnt/data6t/yyz/flow_grpo/flow_base/outputs/results"
+os.makedirs(out_dir, exist_ok=True)
+fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(16, 9))
 
-    # 输出路径（固定到 outputs/...）
-    outputs_root = os.path.join(os.getcwd(), 'outputs')
-    base_dir = args.out.strip() if args.out else os.path.join(outputs_root, f'{args.method}_toy')
-    img_dir = os.path.join(base_dir, 'imgs'); os.makedirs(img_dir, exist_ok=True)
-    _log(f'Output dir: {img_dir}')
+# 顶部列标题
+col_titles = [f"step {idx}/{STEPS}" for f,idx in zip(snap_fracs, snap_indices)]
+TITLE_FONTSIZE=20
+for c in range(3):
+    axes[0, c].set_title(f"Standard FM — {col_titles[c]}", fontsize=TITLE_FONTSIZE, pad=6)
+    axes[1, c].set_title(f"Ourmethod — {col_titles[c]}", fontsize=TITLE_FONTSIZE, pad=6)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# 第一行：Baseline
+for c, idx in enumerate(snap_indices):
+    ax = axes[0, c]
+    draw_means(ax, means); subplot_snapshot(ax, z0, traj_base[idx], line_alpha_mode='density', max_lines=None)
 
-    # 初始点：集中在中心的小圆内，便于体现“向外推”
-    R = float(args.radius)
-    K = int(args.K)
-    r0 = 0.25 * R
-    # 在小圆内均匀采样
-    u = torch.rand(K, 1)
-    theta = 2 * math.pi * torch.rand(K, 1)
-    rad = r0 * torch.sqrt(u)
-    z0 = torch.cat([rad * torch.cos(theta), rad * torch.sin(theta)], dim=1).to(device)
+# 第二行：OSCAR
+for c, idx in enumerate(snap_indices):
+    ax = axes[1, c]
+    draw_means(ax, means); subplot_snapshot(ax, z0, traj_oscar[idx], line_alpha_mode='density', max_lines=None)
 
-    # 模拟两种过程（同一批起点）
-    traj_fm  = simulate_flow_matching(z0, steps=args.steps, R=R,
-                                      k_rad=4.0, k_attract=2.2,
-                                      theta_star=0.0, noise_std=0.02)
-    traj_ours = simulate_our_method(z0, steps=args.steps, R=R,
-                                    k_rad=4.0, repulse_sigma=0.6,
-                                    repulse_scale=2.0, noise_std=0.02)
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+png = os.path.join(out_dir, "grid2x3.png")
+pdf = os.path.join(out_dir, "grid2x3.pdf")
+plt.savefig(png, dpi=300); plt.savefig(pdf); plt.close(fig)
 
-    # 箭头子样本索引（两幅图共用）
-    n_ar = min(args.n_arrows, K)
-    arrow_idx = np.random.choice(K, size=n_ar, replace=False)
-
-    # 画图
-    fig = plt.figure(figsize=(12, 5))
-    axL = plt.subplot(1,2,1)
-    plot_process_panel(axL, traj_fm,  R, arrow_idx,
-                       trail_keyframes=args.trail_keyframes,
-                       point_size=6.0, arrow_width=0.004)
-    axL.set_title("Flow Matching")
-    axL.set_aspect('equal', adjustable='box')
-    axL.set_xlim(-R, R); axL.set_ylim(-R, R); axL.set_xticks([]); axL.set_yticks([])
-
-    axR = plt.subplot(1,2,2)
-    plot_process_panel(axR, traj_ours, R, arrow_idx,
-                       trail_keyframes=args.trail_keyframes,
-                       point_size=6.0, arrow_width=0.004)
-    axR.set_title("Our Method")
-    axR.set_aspect('equal', adjustable='box')
-    axR.set_xlim(-R, R); axR.set_ylim(-R, R); axR.set_xticks([]); axR.set_yticks([])
-
-    plt.tight_layout()
-    png_path = os.path.join(img_dir, "comparison_with_arrows.png")
-    pdf_path = os.path.join(img_dir, "comparison_with_arrows.pdf")
-    plt.savefig(png_path, dpi=300)
-    plt.savefig(pdf_path)  # 矢量 PDF
-    plt.close(fig)
-    _log(f"Saved: {png_path}")
-    _log(f"Saved: {pdf_path}")
-
-if __name__ == "__main__":
-    main()
+print("Saved:", png, pdf)

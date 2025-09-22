@@ -577,7 +577,7 @@ def _build_inception_extractor(device: torch.device):
 
 def _make_fid_transform():
     return T.Compose([
-        T.Resize(299, interpolation=T.InterpolationMode.BILINEAR),
+        T.Resize(299, interpolation=T.InterpolationMode.BICUBIC),
         T.CenterCrop(299),
         T.ToTensor(),
     ])
@@ -961,7 +961,7 @@ def main():
                     help="Match pipeline CLIP image size (e.g., 224 or 336).")
 
     # 可选：自定义方法列表，默认只跑 dpp/pg/cads
-    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads","noise"],
+    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads","ourmethod"],
                     help="Methods to run (default: dpp pg cads). 'ours' will be ignored if included.")
 
     # === KID ===

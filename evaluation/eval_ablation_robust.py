@@ -521,7 +521,7 @@ def main():
     # Filters
     ap.add_argument("--methods", nargs="+", default=["wo_OP","wo_LR","ourmethod"],
                     help="For ablation: which methods to include (default: detect common three).")
-    ap.add_argument("--groups", nargs="+", default=["lambda","alpha","noise_gate"],
+    ap.add_argument("--groups", nargs="+", default=["lambda","alpha","noise_scale"],
                     help="For robust: which groups to include.")
     # Device & dataloading
     ap.add_argument("--device", type=str, default="cuda:0")

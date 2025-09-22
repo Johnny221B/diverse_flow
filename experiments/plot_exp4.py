@@ -195,6 +195,18 @@ def plot_scores_multi(method_to_data: dict, score_type="DIM", save_path="plot.pn
     plt.close(fig)
     print(f"[OK] saved: {save_path}")
     print(f"[OK] saved PDF: {pdf_path}")
+    
+    print("\n[Columns data in plot order]")
+    header = "Index  Attribute                | " + " | ".join(_format_method_label(m) for m in methods)
+    print(header)
+    print("-" * len(header))
+    for idx, (t, a) in enumerate(order):
+        row_vals = []
+        for m in methods:
+            v = method_to_data.get(m, {}).get(t, {}).get(a, np.nan)
+            row_vals.append("nan" if (v is None or (isinstance(v, float) and np.isnan(v))) else f"{float(v):.6g}")
+        attr_name = f"{t}-{a}"
+        print(f"{idx:>5}  {attr_name:<23} | " + " | ".join(f"{rv:>8}" for rv in row_vals))
 
 # ---------- CLI ----------
 def main():

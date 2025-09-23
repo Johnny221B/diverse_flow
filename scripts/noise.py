@@ -126,7 +126,7 @@ def parse_args():
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
     ap.add_argument('--guidance', type=float, default=3.0)
-    ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--seed', type=int, default=0)
 
     # 本地模型路径
     ap.add_argument('--model-dir', type=str,
@@ -143,7 +143,7 @@ def parse_args():
 
     # 正交/门控
     ap.add_argument('--partial-ortho', type=float, default=0.95)   # 体积力对基流正交比例
-    ap.add_argument('--t-gate', type=str, default='0.85,0.95')     # 仅用于确定性体积漂移
+    ap.add_argument('--t-gate', type=str, default='0.30,0.95')     # 仅用于确定性体积漂移
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2', 't1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-3)

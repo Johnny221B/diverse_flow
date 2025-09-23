@@ -138,7 +138,7 @@ def _legend_label(label: str):
     if lower == "pg": return "PG"
     if lower == "dpp": return "DPP"
     if lower == "cads": return "CADS"
-    if lower == "ourmethod": return "Ourmethod"
+    if lower == "ourmethod": return "OSCAR"
     return label
 
 # -------------------------
@@ -164,7 +164,7 @@ def plot_guidances_panel(
     color_map = {m: base_colors[i % len(base_colors)] for i, m in enumerate(methods)}
 
     # 增加图形高度以适应更大的字体
-    fig, axes = plt.subplots(1, n, figsize=(3.3*n + 2.0, 3.5), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, n, figsize=(3.3*n + 2.0, 3.2), sharex=True, sharey=True)
     axes = [axes] if n == 1 else list(axes)
 
     summary_rows = []
@@ -211,6 +211,8 @@ def plot_guidances_panel(
                 "rec_at_p0.76_mu": summary["rec_at_p0.76_mu"],
                 "source": str(csv_path),
             })
+            
+        ax.set_yticks(np.arange(0.0, 0.8, 0.3))
 
         ax.grid(True, ls="--", alpha=0.35)
         if xlim: ax.set_xlim(*xlim)
@@ -222,9 +224,8 @@ def plot_guidances_panel(
             for lh in leg.legend_handles:
                 lh.set_linewidth(2)
 
-    # 增加坐标轴标签字号
-    fig.supxlabel("Recall", fontsize=15)
-    fig.supylabel("Precision", fontsize=15)
+    fig.supxlabel("Recall", fontsize=15, y=0.08)  # 增加y值减小标签与图的距离
+    fig.supylabel("Precision", fontsize=15, x=0.02)  # 增加x值减小标签与图的距离
     
     ttl = f"PRD in class-conditional task on Concept '{concept}'"
     if title_suffix:

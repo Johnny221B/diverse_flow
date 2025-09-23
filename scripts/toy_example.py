@@ -222,7 +222,7 @@ def subplot_snapshot(ax, x0: torch.Tensor, x_now: torch.Tensor,
 
     # 初始点（浅色）
     _xi = xi.cpu().numpy()
-    ax.scatter(_xi[:,0], _xi[:,1], s=9, alpha=0.26, marker='o')
+    ax.scatter(_xi[:,0], _xi[:,1], s=9, alpha=0.20, marker='o')
 
     # 自适应透明度的连线（init -> current）
     alphas = compute_line_alpha(xi, xT, mode=line_alpha_mode,
@@ -237,7 +237,7 @@ def subplot_snapshot(ax, x0: torch.Tensor, x_now: torch.Tensor,
 
     # 当前点
     _xT = xT.cpu().numpy()
-    ax.scatter(_xT[:,0], _xT[:,1], s=14, alpha=0.95, marker='x')
+    ax.scatter(_xT[:,0], _xT[:,1], s=14, alpha=0.70, marker='x')
 
     ax.set_xlim(-3,3); ax.set_ylim(-3,3)
     ax.set_aspect('equal', adjustable='box'); ax.grid(True, alpha=0.25)
@@ -283,28 +283,42 @@ snap_indices = [min(int(f*STEPS), STEPS) for f in snap_fracs]
 # 2 行 × 3 列：第 1 行 Baseline；第 2 行 OSCAR
 out_dir = "/mnt/data6t/yyz/flow_grpo/flow_base/outputs/results"
 os.makedirs(out_dir, exist_ok=True)
-fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(16, 9))
+fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(8, 5.5), constrained_layout=False)
 
-# 顶部列标题
-col_titles = [f"step {idx}/{STEPS}" for f,idx in zip(snap_fracs, snap_indices)]
-TITLE_FONTSIZE=20
-for c in range(3):
-    axes[0, c].set_title(f"Standard FM — {col_titles[c]}", fontsize=TITLE_FONTSIZE, pad=6)
-    axes[1, c].set_title(f"Ourmethod — {col_titles[c]}", fontsize=TITLE_FONTSIZE, pad=6)
+# 添加统一标题（靠上但不占用太多空间）
+fig.suptitle("Flow Matching vs. OSCAR — Progress Over Time", fontsize=20, y=0.99)
 
-# 第一行：Baseline
+# 设置列标签和行标签
+col_labels = ['Step 400/2000', 'Step 1200/2000', 'Step 2000/2000']
+row_labels = ['Standard FM', 'OSCAR']
+
+for r in range(2):
+    for c in range(3):
+        if r == 0:
+            axes[r, c].set_title(col_labels[c], fontsize=15, pad=2)
+        if c == 0:
+            axes[r, c].annotate(row_labels[r], xy=(-0.1, 0.5), xycoords='axes fraction',
+                                fontsize=15, rotation=90, va='center', ha='center')
+
+# 绘制内容
 for c, idx in enumerate(snap_indices):
-    ax = axes[0, c]
-    draw_means(ax, means); subplot_snapshot(ax, z0, traj_base[idx], line_alpha_mode='density', max_lines=None)
+    draw_means(axes[0, c], means)
+    subplot_snapshot(axes[0, c], z0, traj_base[idx], line_alpha_mode='density')
+    draw_means(axes[1, c], means)
+    subplot_snapshot(axes[1, c], z0, traj_oscar[idx], line_alpha_mode='density')
 
-# 第二行：OSCAR
-for c, idx in enumerate(snap_indices):
-    ax = axes[1, c]
-    draw_means(ax, means); subplot_snapshot(ax, z0, traj_oscar[idx], line_alpha_mode='density', max_lines=None)
+# 超紧凑排版
+plt.subplots_adjust(
+    left=0.03, right=0.985,    # 极限压缩左右边距
+    top=0.88, bottom=0.06,     # 压缩上下边距，保留标题
+    wspace=0.05, hspace=0.08   # 缩小子图之间间隔
+)
 
-plt.tight_layout(rect=[0, 0, 1, 0.96])
-png = os.path.join(out_dir, "grid2x3.png")
-pdf = os.path.join(out_dir, "grid2x3.pdf")
-plt.savefig(png, dpi=300); plt.savefig(pdf); plt.close(fig)
+# 保存图像
+png = os.path.join(out_dir, "grid2x3_fulltight.png")
+pdf = os.path.join(out_dir, "grid2x3_fulltight.pdf")
+plt.savefig(png, dpi=300, bbox_inches='tight')  # bbox_inches 进一步消除多余边框
+plt.savefig(pdf, dpi=300, bbox_inches='tight')
+plt.close(fig)
 
 print("Saved:", png, pdf)

@@ -105,7 +105,7 @@ def _norm_label(name: str) -> str:
     if lo == "pg": return "PG"
     if lo == "dpp": return "DPP"
     if lo == "cads": return "CADS"
-    if lo == "ourmethod": return "Ourmethod"
+    if lo == "ourmethod": return "OSCAR"
     return name
 
 

@@ -212,7 +212,7 @@ def plot_guidances_panel(
                 "source": str(csv_path),
             })
             
-        ax.set_yticks(np.arange(0.0, 0.8, 0.3))
+        ax.set_yticks(np.arange(0.0, 1.0, 0.3))
 
         ax.grid(True, ls="--", alpha=0.35)
         if xlim: ax.set_xlim(*xlim)

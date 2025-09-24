@@ -112,16 +112,16 @@ def parse_args():
     p.add_argument("--guidances", type=float, nargs="+", default=None,
                    help="multi guidance")
     p.add_argument("--guidance", type=float, default=7.0, help="single choice")
-    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444])
+    p.add_argument("--seeds", type=int, nargs="+", default=[1111])
 
     # 统一分辨率
     p.add_argument("--width", type=int, default=512)
     p.add_argument("--height", type=int, default=512)
 
     # 模型与多卡
-    p.add_argument("--device_transformer", type=str, default="cuda:0")
-    p.add_argument("--device_vae", type=str, default="cuda:1")
-    p.add_argument("--device_clip", type=str, default="cuda:2")
+    p.add_argument("--device_transformer", type=str, default="cuda:1")
+    p.add_argument("--device_vae", type=str, default="cuda:0")
+    p.add_argument("--device_clip", type=str, default="cuda:0")
     p.add_argument("--model-dir", type=str,
                    default=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models", "stable-diffusion-3.5-medium")),
                    help="local SD3.5 Diffusers model")

@@ -57,9 +57,9 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
 
     # 多卡放置
-    p.add_argument("--device_transformer", type=str, default="cuda:0")
-    p.add_argument("--device_vae", type=str, default="cuda:1")
-    p.add_argument("--device_clip", type=str, default="cuda:2")
+    p.add_argument("--device_transformer", type=str, default="cuda:1")
+    p.add_argument("--device_vae", type=str, default="cuda:0")
+    p.add_argument("--device_clip", type=str, default="cuda:0")
 
     # 本地 SD3.5
     p.add_argument(

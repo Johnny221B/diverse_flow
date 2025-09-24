@@ -87,12 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Device placement (optional)
     d = p.add_argument_group("Devices")
-    d.add_argument("--device-transformer", type=str, default=None)
-    d.add_argument("--device-vae", type=str, default=None)
-    d.add_argument("--device-clip", type=str, default=None, help="Alias for text encoders")
-    d.add_argument("--device-text1", type=str, default=None)
-    d.add_argument("--device-text2", type=str, default=None)
-    d.add_argument("--device-text3", type=str, default=None)
+    d.add_argument("--device-transformer", type=str, default="cuda:1")
+    d.add_argument("--device-vae", type=str, default="cuda:0")
+    d.add_argument("--device-clip", type=str, default="cuda:0", help="Alias for text encoders")
+    d.add_argument("--device-text1", type=str, default="cuda:1")
+    d.add_argument("--device-text2", type=str, default="cuda:1")
+    d.add_argument("--device-text3", type=str, default="cuda:1")
 
     # Debug
     p.add_argument("--debug", action="store_true")

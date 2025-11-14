@@ -23,6 +23,8 @@ __pycache__/
 
 /t2v_metrics/
 /evaluation/DIMCIM/
+/evaluation/aesthetic-predictor/
+/evaluation/ImageReward/
 /BeyondFID/
 /experiments/experiment1/
 /experiments/experiment3/

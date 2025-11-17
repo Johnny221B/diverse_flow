@@ -5,18 +5,24 @@
 Ablation Study for SD3.5 + CLIP (early-noise, colored dots friendly)
 
 Methods:
-  - wo_OP     : remove orthogonal projection (lambda_op=0.0 & partial_ortho=0, OP 路径直接跳过)
-  - wo_LR     : remove leverage (leverage_alpha=0.0)
-  - ourmethod : baseline（保留 OP 与 LR）
+  - ours              : OP + RR + Noise 全开
+  - wo_OP             : 去掉 OP（lambda_op=0 & partial_ortho=0，OP 路径直接跳过）
+  - wo_RR             : 去掉 RR（leverage_alpha=0）
+  - wo_OP_RR          : 去掉 OP 和 RR（只有 Noise）
+  - wo_Noise          : 去掉 Noise（只有 OP + RR）
+  - wo_OP_RR_Noise    : 去掉 OP / RR / Noise（只剩体积项）
 
 输出目录（与评测脚本兼容）：
 outputs/ablation/<method>/{imgs,eval}/
   imgs/<prompt_slug>_seed{seed}_g{guidance}_s{steps}/img_000.png ...
 
-默认参数偏激进，用于放大失真现象（车头错位、尺寸波动等）：
-  --gamma0 0.12 --t-gate 0.70,0.99 --partial-ortho 1.0
-  --noise-timing early --noise-scale 0.9
-  --steps 30 --guidance 3.0
+默认参数：
+  steps      = 30
+  guidance   = 5.0
+  seeds      = 1111 2222 3333 4444 5555 6666
+
+噪声仍然使用老版本的“早期强、后期弱”的 sqrt(dt) Brownian 形式，
+容易产生结构性“花掉”的现象，用于放大 ablation 差异。
 """
 
 import os
@@ -25,8 +31,7 @@ import sys
 import time
 import argparse
 import traceback
-from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, List
 
 import torch
 import torch.nn as nn
@@ -73,7 +78,9 @@ def inspect_pipe_devices(pipe):
     for name in names:
         if not hasattr(pipe, name): continue
         obj = getattr(pipe, name)
-        if obj is None: report[name] = "None"; continue
+        if obj is None: 
+            report[name] = "None"
+            continue
         if isinstance(obj, nn.Module):
             dev = _first_device_of_module(obj)
             report[name] = str(dev) if dev is not None else "module(no params)"
@@ -103,28 +110,39 @@ def _slugify(text: str, maxlen: int = 120) -> str:
 
 def _resolve_model_dir(path: str) -> str:
     p = os.path.abspath(path)
-    if os.path.isfile(os.path.join(p, 'model_index.json')): return p
+    if os.path.isfile(os.path.join(p, 'model_index.json')): 
+        return p
     for root, _, files in os.walk(p):
-        if 'model_index.json' in files: return root
+        if 'model_index.json' in files:
+            return root
     raise FileNotFoundError(f'Could not find model_index.json under {path}')
 
 
 # -------------------- args --------------------
 
 def parse_args():
-    ap = argparse.ArgumentParser(description='Ablation Study (wo_OP / wo_LR / ourmethod) [early-noise]')
+    ap = argparse.ArgumentParser(
+        description='Ablation Study (OP / RR / Noise) [early-noise old version]'
+    )
 
-    # 生成
+    # 生成相关
     ap.add_argument('--prompt', type=str, required=True)
     ap.add_argument('--negative', type=str, default='')
     ap.add_argument('--G', type=int, default=20)
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
-    ap.add_argument('--guidance', type=float, default=3.0)
-    ap.add_argument('--seeds', type=int, nargs='+', default=[1111, 2222, 3333, 4444])
+    ap.add_argument('--guidance', type=float, default=5.0)
+    ap.add_argument('--seeds', type=int, nargs='+',
+                    default=[1111, 2222, 3333, 4444, 5555, 6666])
 
-    ap.add_argument('--methods', nargs='+', default=['wo_OP','wo_LR','ourmethod'])
+    # 6 种方法：ours + 5 个 ablation
+    ap.add_argument(
+        '--methods',
+        nargs='+',
+        default=['ours', 'wo_OP', 'wo_RR', 'wo_OP_RR', 'wo_Noise', 'wo_OP_RR_Noise'],
+        help='Ablation methods to run.'
+    )
 
     # 模型与设备
     ap.add_argument('--model-dir', type=str,
@@ -140,6 +158,7 @@ def parse_args():
     ap.add_argument('--enable-xformers', action='store_true')
     ap.add_argument('--debug', action='store_true')
 
+    # 体积项（跟老版本一致，偏激进）
     ap.add_argument('--gamma0', type=float, default=0.12)
     ap.add_argument('--gamma-max-ratio', type=float, default=0.3)
     ap.add_argument('--partial-ortho', type=float, default=1.0)
@@ -148,9 +167,11 @@ def parse_args():
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-3)
 
+    # 噪声调度
     ap.add_argument('--noise-timing', type=str, default='early', choices=['early','late'])
     ap.add_argument('--noise-scale', type=float, default=0.9)
 
+    # 默认的 OP / RR 强度
     ap.add_argument('--lambda-op-default', type=float, default=0.95)
     ap.add_argument('--leverage-alpha-default', type=float, default=0.6)
 
@@ -188,17 +209,14 @@ def main():
         # ---- 设备 + dtype
         dev_tr  = torch.device(args.device_transformer)
         dev_vae = torch.device(args.device_vae)
-        dev_te1 = torch.device(args.device_text1)
-        dev_te2 = torch.device(args.device_text2)
-        dev_te3 = torch.device(args.device_text3)
         dev_clip= torch.device(args.device_clip)
         dtype   = torch.bfloat16 if dev_tr.type == 'cuda' else torch.float32
 
-        _log(f"Devices: transformer={dev_tr}, vae={dev_vae}, text1={dev_te1}, text2={dev_te2}, text3={dev_te3}, clip={dev_clip}", args.debug)
+        _log(f"Devices: transformer={dev_tr}, vae={dev_vae}, clip={dev_clip}", args.debug)
         print_mem_all("before-pipeline-call", [dev_tr, dev_vae, dev_clip])
 
         # ---- Pipeline
-        model_dir = _resolve_model_dir(args.model_dir)
+        model_dir = _resolve_model_dir(args.model-dir) if False else _resolve_model_dir(args.model_dir)
         pipe = StableDiffusion3Pipeline.from_pretrained(model_dir, torch_dtype=dtype, local_files_only=True)
         pipe.set_progress_bar_config(leave=True)
         pipe = pipe.to("cpu")
@@ -207,12 +225,14 @@ def main():
         if hasattr(pipe, "text_encoder_2"): pipe.text_encoder_2.to(dev_tr, dtype=dtype)
         if hasattr(pipe, "text_encoder_3"): pipe.text_encoder_3.to(dev_tr, dtype=dtype)
         if hasattr(pipe, "vae"):            pipe.vae.to(dev_vae,        dtype=dtype)
-        if args.enable_vae_tiling:
+        if args.enable_vae_tiling and hasattr(pipe, "vae"):
             if hasattr(pipe.vae, "enable_slicing"): pipe.vae.enable_slicing()
             if hasattr(pipe.vae, "enable_tiling"):  pipe.vae.enable_tiling()
         if args.enable_xformers:
-            try: pipe.enable_xformers_memory_efficient_attention()
-            except Exception as e: _log(f"enable_xformers failed: {e}", args.debug)
+            try:
+                pipe.enable_xformers_memory_efficient_attention()
+            except Exception as e:
+                _log(f"enable_xformers failed: {e}", args.debug)
         inspect_pipe_devices(pipe)
         if hasattr(pipe, "transformer"):    assert_on(pipe.transformer, dev_tr)
         if hasattr(pipe, "text_encoder"):   assert_on(pipe.text_encoder,   dev_tr)
@@ -220,7 +240,7 @@ def main():
         if hasattr(pipe, "text_encoder_3"): assert_on(pipe.text_encoder_3, dev_tr)
         if hasattr(pipe, "vae"):            assert_on(pipe.vae,            dev_vae)
 
-        # ---- CLIP & Volume
+        # ---- CLIP
         clip = CLIPWrapper(
             impl="openai_clip", arch="ViT-B-32",
             jit_path=args.clip_jit, checkpoint_path=None,
@@ -236,7 +256,7 @@ def main():
                 base = min(1.0, (1.0 - t) / (t + eps))
             return float(args.noise_scale) * float(base)
 
-        # OP 应用：lambda_op 控制去除平行分量强度；partial_ortho 作为混合权重
+        # OP 应用：lambda_op 控制去除平行分量强度；alpha=partial_ortho 作为混合权重
         def _apply_op(g: torch.Tensor, v: Optional[torch.Tensor], lambda_op: float, alpha: float) -> torch.Tensor:
             if (v is None) or (lambda_op <= 0.0) or (alpha <= 0.0):
                 return g
@@ -259,28 +279,43 @@ def main():
             os.makedirs(imgs_root, exist_ok=True)
             os.makedirs(eval_dir,  exist_ok=True)
 
-            # per-method overrides
+            # per-method: 决定是否启用 OP / RR / Noise
             if method == "wo_OP":
-                lambda_op_use = 0.0          # 彻底关闭
-                partial_ortho_use = 0.0      # 不参与 OP
-                leverage_alpha_use = float(args.leverage_alpha_default)
-                def do_op(g, v):  # 保证跳过
-                    return g
-            elif method == "wo_LR":
-                lambda_op_use = float(args.lambda_op_default)
-                partial_ortho_use = float(args.partial_ortho)
-                leverage_alpha_use = 0.0     # 彻底关闭 LR
-                def do_op(g, v):
-                    return _apply_op(g, v, lambda_op_use, partial_ortho_use)
-            else:  # ourmethod
-                lambda_op_use = float(args.lambda_op_default)
-                partial_ortho_use = float(args.partial_ortho)
-                leverage_alpha_use = float(args.leverage_alpha_default)
-                def do_op(g, v):
-                    return _apply_op(g, v, lambda_op_use, partial_ortho_use)
+                lambda_op_use       = 0.0
+                partial_ortho_use   = 0.0
+                leverage_alpha_use  = float(args.leverage_alpha_default)
+                use_noise           = True
+            elif method == "wo_RR":
+                lambda_op_use       = float(args.lambda_op_default)
+                partial_ortho_use   = float(args.partial_ortho)
+                leverage_alpha_use  = 0.0
+                use_noise           = True
+            elif method == "wo_OP_RR":
+                lambda_op_use       = 0.0
+                partial_ortho_use   = 0.0
+                leverage_alpha_use  = 0.0
+                use_noise           = True
+            elif method == "wo_Noise":
+                lambda_op_use       = float(args.lambda_op_default)
+                partial_ortho_use   = float(args.partial_ortho)
+                leverage_alpha_use  = float(args.leverage_alpha_default)
+                use_noise           = False
+            elif method == "wo_OP_RR_Noise":
+                lambda_op_use       = 0.0
+                partial_ortho_use   = 0.0
+                leverage_alpha_use  = 0.0
+                use_noise           = False
+            else:  # 'ours'
+                lambda_op_use       = float(args.lambda_op_default)
+                partial_ortho_use   = float(args.partial_ortho)
+                leverage_alpha_use  = float(args.leverage_alpha_default)
+                use_noise           = True
 
-            # VolumeObjective（按方法重建，确保 LR 生效/禁用）
-            t0, t1 = [float(x) for x in args.t_gate.split(',')]
+            def do_op(g, v):
+                return _apply_op(g, v, lambda_op_use, partial_ortho_use)
+
+            # VolumeObjective（按方法重建，确保 RR 生效/禁用）
+            t0, t1 = [float(x) for x in args.t-gate.split(',')] if False else [float(x) for x in args.t_gate.split(',')]
             cfg = DiversityConfig(
                 num_steps=args.steps, tau=args.tau, eps_logdet=args.eps_logdet,
                 gamma0=args.gamma0, gamma_max_ratio=args.gamma_max_ratio,
@@ -290,7 +325,9 @@ def main():
             )
             vol = VolumeObjective(clip, cfg)
 
-            _log(f"[ablation] method={method} | lambda_op={lambda_op_use} | partial_ortho={partial_ortho_use} | leverage_alpha={leverage_alpha_use}", True)
+            _log(f"[ablation] method={method} | lambda_op={lambda_op_use} | "
+                 f"partial_ortho={partial_ortho_use} | leverage_alpha={leverage_alpha_use} | "
+                 f"use_noise={use_noise}", True)
 
             for sd in args.seeds:
                 run_dir = os.path.join(
@@ -323,7 +360,8 @@ def main():
                     dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
 
                     lat = kw.get("latents")
-                    if lat is None: return kw
+                    if lat is None: 
+                        return kw
 
                     gamma_sched = cfg.gamma0 * time_sched_factor(t_norm, cfg.t_gate, cfg.sched_shape)
                     if gamma_sched <= 0:
@@ -378,13 +416,16 @@ def main():
                         g_det = do_op(grad_lat, v_est)
                         div_disp = g_det * dt_unit
 
-                        # 噪声：白噪声 + 完全正交到基流；不乘 γ；前期（默认）更强
-                        beta = _beta_time_sched(t_norm)
-                        if (beta > 0.0) and (v_est is not None):
-                            from diverse_flow.utils import project_partial_orth as ppo
-                            xi = torch.randn_like(g_det)
-                            xi = ppo(xi, v_est, 1.0)
-                            noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
+                        # 噪声：白噪声 + 完全正交到基流；不乘 γ；前期更强
+                        if use_noise and (v_est is not None):
+                            beta = _beta_time_sched(t_norm)
+                            if beta > 0.0:
+                                from diverse_flow.utils import project_partial_orth as ppo
+                                xi = torch.randn_like(g_det)
+                                xi = ppo(xi, v_est, 1.0)
+                                noise_disp = (2.0 * beta)**0.5 * (dt_unit**0.5) * xi
+                            else:
+                                noise_disp = torch.zeros_like(g_det)
                         else:
                             noise_disp = torch.zeros_like(g_det)
 
@@ -398,7 +439,8 @@ def main():
                         delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
                         lat_new[s:e] = lat_new[s:e] + delta_tr
 
-                        if "ctrl_cache" not in state: state["ctrl_cache"] = []
+                        if "ctrl_cache" not in state: 
+                            state["ctrl_cache"] = []
                         state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
 
                         if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
@@ -440,13 +482,12 @@ def main():
                         lambda z: (pipe.vae.decode(z / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0,
                         latents_final, use_reentrant=False
                     )
-                from torchvision.utils import save_image
                 for i_img in range(images.size(0)):
                     save_image(images[i_img].cpu(), os.path.join(run_dir, f"img_{i_img:03d}.png"))
 
                 del out, latents_final, images
 
-        _log("Ablation study (early-noise) finished.", True)
+        _log("Ablation study (OP / RR / Noise, early-noise) finished.", True)
 
     except Exception:
         print("\n=== FATAL ERROR ===\n")

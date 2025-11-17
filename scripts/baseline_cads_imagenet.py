@@ -2,37 +2,50 @@
 """
 Grid evaluation for CADS on SD-3.5 (Flow-Matching).
 
-- Inputs:
-  * A JSON file with multiple concepts:
+- Mode A: 多 concept grid（原始逻辑）
+  * 输入: --spec JSON
       {
         "dog": ["a photo of a dog", "a dog", ...],
         "truck": ["a photo of a truck", "a truck", ...],
         ...
       }
-    (top-level keys are concepts; values are lists of prompts)
-  * Or a single --prompt string (back-compat).
+    或单个 --prompt
 
-- Outputs:
-  outputs/{method}_{concept}/
-    ├── eval/
-    │     └── {method}_{concept}_cost.csv     # 新增：开销统计（含 peak 显存）
-    └── imgs/
-        └── {prompt_slug}_seed{SEED}_g{GUIDANCE}_s{STEPS}/
-            00.png, 01.png, ...
+  * 输出:
+    outputs/{method}_{concept}/
+      ├── eval/             # reserved for metrics
+      └── imgs/
+          └── {prompt_slug}_seed{SEED}_g{GUIDANCE}_s{STEPS}/
+              00.png, 01.png, ...
 
-Example:
+- Mode B: ImageNet-400 模式
+  * 输入: --imagenet-json imagenet_400_prompts.json
+      {
+        "0": "a photo of a tench",
+        "1": "a photo of a goldfish",
+        ...
+        "399": "a photo of an abaya"
+      }
+
+  * 输出:
+    outputs/imagenet_400/{method}/
+      cls_000.png
+      cls_001.png
+      ...
+      cls_399.png
+
+Example (ImageNet-400):
   python -u scripts/cads_eval_grid.py \
     --model "./models/stable-diffusion-3.5-medium" \
-    --spec ./specs/prompt.json \
-    --negative "" \
-    --G 16 --steps 10 \
-    --guidances 3.0 7.5 12.0 \
-    --seeds 1111 2222 3333 4444 \
+    --imagenet-json ./imagenet_400_prompts.json \
+    --negative "low quality, blurry" \
+    --steps 30 \
+    --guidance 5.0 \
     --height 512 --width 512 \
     --dtype fp16 \
     --device-transformer cuda:0 --device-vae cuda:1 --device-clip cuda:0 \
     --method cads \
-    --profile-flops    # 如果想统计 FLOPs
+    --seed 0
 """
 
 from __future__ import annotations
@@ -41,8 +54,6 @@ import argparse
 import json
 import sys
 import re
-import time
-import csv
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from collections import OrderedDict
@@ -50,12 +61,6 @@ from collections import OrderedDict
 import torch
 from PIL import Image
 from diffusers import StableDiffusion3Pipeline, DiffusionPipeline
-
-# 可选：torch.profiler 用于 FLOPs 统计
-try:
-    import torch.profiler as torch_profiler
-except Exception:
-    torch_profiler = None
 
 # Repo root on sys.path
 _THIS = Path(__file__).resolve()
@@ -124,10 +129,6 @@ def _outputs_root(method: str, concept: str) -> Tuple[Path, Path, Path]:
     eval_dir.mkdir(parents=True, exist_ok=True)
     imgs_dir.mkdir(parents=True, exist_ok=True)
     return base, eval_dir, imgs_dir
-
-def _prompt_run_dir(imgs_root: Path, prompt: str, seed: int, guidance: float, steps: int) -> Path:
-    pslug = slugify(prompt)
-    return imgs_root / f"{pslug}_seed{seed}_g{guidance}_s{steps}"
 
 def _save_images(imgs: List[Image.Image], out_dir: Path, wh: Tuple[int, int]):
     W, H = int(wh[0]), int(wh[1])
@@ -237,21 +238,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Model / output
     p.add_argument("--model", type=str, default="models/stable-diffusion-3.5-medium")
-    p.add_argument("--method", type=str, default="cads", help="outputs/{method}_{concept}")
-    p.add_argument("--out", type=str, default="outputs", help="(unused for structure; kept for compatibility)")
+    p.add_argument("--method", type=str, default="cads", help="outputs/{method}_{concept} or outputs/imagenet_400/{method}")
+    p.add_argument("--out", type=str, default="outputs", help="root outputs dir (ImageNet-400 模式会用到)")
 
-    # Prompts (multi-concept spec or single prompt)
+    # Prompts (multi-concept spec or single prompt, or ImageNet json)
     p.add_argument("--spec", type=str, default=None,
                    help="Path to JSON: {concept: [prompts...]} (overrides --prompt)")
-    p.add_argument("--prompt", type=str, default=None, help="Fallback if --spec not provided")
+    p.add_argument("--prompt", type=str, default=None, help="Fallback if --spec and --imagenet-json not provided")
+    p.add_argument("--imagenet-json", type=str, default=None,
+                   help="Path to ImageNet-400 prompt JSON: {class_id: prompt}")
     p.add_argument("--negative", type=str, default="low quality, blurry")
 
     # Grid
-    p.add_argument("--G", type=int, default=32, help="images per prompt (group size)")
+    p.add_argument("--G", type=int, default=4, help="images per prompt (group size) in grid mode")
     p.add_argument("--steps", type=int, default=30)
-    p.add_argument("--guidances", type=float, nargs="+", default=None, help="e.g., 3.0 7.5 12.0")
-    p.add_argument("--guidance", type=float, default=3.0, help="used if --guidances omitted")
-    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333])
+    p.add_argument("--guidances", type=float, nargs="+", default=None, help="e.g., 3.0 7.5 12.0 (grid mode)")
+    p.add_argument("--guidance", type=float, default=3.0, help="used if --guidances omitted, and in ImageNet mode")
+
+    # Seeds
+    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444],
+                   help="grid mode seeds; in ImageNet mode, seeds[0] 作为 base_seed")
+    p.add_argument("--seed", type=int, default=42,
+                   help="(optional) base seed for ImageNet mode; if None, use seeds[0]")
 
     # Resolution
     p.add_argument("--height", type=int, default=512)
@@ -277,13 +285,6 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--no-rescale", action="store_true")
     g.add_argument("--dynamic-cfg", action="store_true")
 
-    # Cost profiling
-    p.add_argument(
-        "--profile-flops",
-        action="store_true",
-        help="Use torch.profiler to estimate FLOPs per run (may add overhead)."
-    )
-
     # Debug
     p.add_argument("--debug", action="store_true")
 
@@ -296,19 +297,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main():
     args = build_parser().parse_args()
     torch_dtype = _select_dtype(args.dtype)
-
-    # Parse prompts source (preserve file order)
-    if args.spec:
-        with open(args.spec, "r", encoding="utf-8") as fp:
-            spec = json.load(fp, object_pairs_hook=OrderedDict)
-        concept_to_prompts = _parse_concepts_spec(spec)  # OrderedDict[str, List[str]]
-    elif args.prompt:
-        concept_to_prompts = OrderedDict([("single", [args.prompt])])
-    else:
-        raise ValueError("Provide either --spec (JSON file) or --prompt")
-
-    guidances = args.guidances if args.guidances is not None else [args.guidance]
-    guidances = [float(g) for g in guidances]
 
     # ---- Build pipeline once (then move modules as requested) ----
     _log(f"[CADS] Resolving model from: {args.model}")
@@ -355,39 +343,107 @@ def main():
     except Exception:
         exec_dev = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # ============================================================
+    # Mode B: ImageNet-400 -> outputs/imagenet_400/{method}/cls_xxx.png
+    # ============================================================
+    if args.imagenet_json is not None:
+        imagenet_path = Path(args.imagenet_json)
+        if not imagenet_path.exists():
+            raise FileNotFoundError(f"[CADS] imagenet-json not found: {imagenet_path}")
+
+        with imagenet_path.open("r", encoding="utf-8") as fp:
+            cls_to_prompt: Dict[str, str] = json.load(fp, object_pairs_hook=OrderedDict)
+
+        # base seed
+        base_seed = args.seed if args.seed is not None else (args.seeds[0] if args.seeds else 0)
+        guidance = float(args.guidance)
+
+        out_root = Path(args.out) / "imagenet_400" / args.method
+        out_root.mkdir(parents=True, exist_ok=True)
+        _log(f"[CADS][ImageNet-400] output dir: {out_root}")
+        _log(f"[CADS][ImageNet-400] base_seed={base_seed}, guidance={guidance}, steps={args.steps}")
+
+        # 遍历 class_id，保证 0..399 顺序
+        for cls_id_str, prompt in sorted(cls_to_prompt.items(), key=lambda kv: int(kv[0])):
+            cls_id = int(cls_id_str)
+            cur_seed = int(base_seed) + cls_id
+
+            # 针对每个 class 单独一个 CADS 实例，保证确定性
+            cads = CADS(
+                num_inference_steps=int(args.steps),
+                tau1=float(args.tau1), tau2=float(args.tau2),
+                s=float(args.cads_s), psi=float(args.psi),
+                rescale=(not args.no_rescale),
+                dynamic_cfg=bool(args.dynamic_cfg),
+                seed=cur_seed,
+            )
+            cb = _wrap_cads_callback(cads, int(args.steps))
+
+            # 单图生成：num_images_per_prompt = 1
+            gen = torch.Generator(device=torch.device(exec_dev)).manual_seed(cur_seed)
+
+            _log(f"[CADS][ImageNet-400] cls={cls_id:03d} seed={cur_seed} prompt='{prompt}'")
+
+            try:
+                result = pipe(
+                    prompt=prompt,
+                    negative_prompt=(args.negative if args.negative else None),
+                    height=int(args.height), width=int(args.width),
+                    num_images_per_prompt=1,
+                    num_inference_steps=int(args.steps),
+                    guidance_scale=guidance,
+                    generator=gen,
+                    callback_on_step_end=cb,
+                    callback_on_step_end_tensor_inputs=["latents"],
+                    output_type="pil",
+                )
+            except TypeError:
+                # 某些 pipeline 不支持 height/width
+                result = pipe(
+                    prompt=prompt,
+                    negative_prompt=(args.negative if args.negative else None),
+                    num_images_per_prompt=1,
+                    num_inference_steps=int(args.steps),
+                    guidance_scale=guidance,
+                    generator=gen,
+                    callback_on_step_end=cb,
+                    callback_on_step_end_tensor_inputs=["latents"],
+                    output_type="pil",
+                )
+
+            images = result.images if hasattr(result, "images") else result
+            img = images[0]
+            if img.size != (args.width, args.height):
+                img = img.resize((int(args.width), int(args.height)), resample=Image.BICUBIC)
+
+            filename = f"cls_{cls_id:03d}.png"
+            img.save(out_root / filename)
+
+        _log("[CADS][ImageNet-400] Done.")
+        return
+
+    # ============================================================
+    # Mode A: 原始 grid 模式（多 concept）
+    # ============================================================
+    # Parse prompts source (preserve file order)
+    if args.spec:
+        with open(args.spec, "r", encoding="utf-8") as fp:
+            spec = json.load(fp, object_pairs_hook=OrderedDict)
+        concept_to_prompts = _parse_concepts_spec(spec)  # OrderedDict[str, List[str]]
+    elif args.prompt:
+        concept_to_prompts = OrderedDict([("single", [args.prompt])])
+    else:
+        raise ValueError("Provide either --spec, --prompt, or --imagenet-json")
+
+    guidances = args.guidances if args.guidances is not None else [args.guidance]
+    guidances = [float(g) for g in guidances]
+
     # ---- Iterate by concept to write into outputs/{method}_{concept}/... ----
     for concept, prompts in concept_to_prompts.items():
         base_dir, eval_dir, imgs_root = _outputs_root(args.method, concept)
         _log(f"[CADS] outputs base: {base_dir}")
         _log(f"[CADS] eval dir:     {eval_dir}")
         _log(f"[CADS] imgs root:    {imgs_root}")
-
-        # 准备 cost CSV：outputs/{method}_{concept}/eval/{method}_{concept}_cost.csv
-        cost_csv_path = eval_dir / f"{args.method}_{slugify(concept)}_cost.csv"
-        csv_new = not cost_csv_path.exists()
-        cost_f = open(cost_csv_path, "a", encoding="utf-8", newline="")
-        cost_writer = csv.writer(cost_f)
-        if csv_new:
-            cost_writer.writerow([
-                "method",
-                "concept",
-                "prompt",
-                "seed",
-                "guidance",
-                "steps",
-                "num_images",
-                "height",
-                "width",
-                "dtype",
-                "device_transformer",
-                "device_vae",
-                "device_clip",
-                "wall_time_total",
-                "wall_time_per_image",
-                "flops_total",
-                "flops_per_image",
-                "gpu_mem_peak_mb",   # 新增列：单次 run 的峰值显存（MB，跨多卡取 max）
-            ])
 
         # Grid: prompt × guidance × seed
         for ptxt in prompts:
@@ -406,156 +462,39 @@ def main():
                     gens = _generators_for_K(exec_dev, int(sd), int(args.G))
                     cb = _wrap_cads_callback(cads, int(args.steps))
 
-                    run_dir = _prompt_run_dir(
-                        imgs_root=imgs_root,
-                        prompt=ptxt, seed=int(sd),
-                        guidance=float(g), steps=int(args.steps)
-                    )
+                    pslug = slugify(ptxt)
+                    run_dir = imgs_root / f"{pslug}_seed{int(sd)}_g{g}_s{int(args.steps)}"
                     _log(f"[CADS] sampling: concept='{concept}' | prompt='{ptxt}' | seed={sd} | guidance={g} | steps={args.steps} -> {run_dir}")
 
-                    # ---- Cost measurement: wall-clock + optional FLOPs + peak GPU memory (multi-GPU) ----
-                    flops_total = -1.0
-                    gpu_mem_peak_mb = -1.0
-
-                    # 收集可能用到的 CUDA devices（去重）
-                    mem_devices: List[torch.device] = []
-                    if torch.cuda.is_available():
-                        dev_strs = set([
-                            args.device_transformer,
-                            args.device_vae,
-                            args.device_clip,
-                            exec_dev,
-                        ])
-                        for ds in dev_strs:
-                            if ds is None:
-                                continue
-                            try:
-                                d = torch.device(ds)
-                            except Exception:
-                                continue
-                            if d.type != "cuda":
-                                continue
-                            # 去重
-                            if all(d != x for x in mem_devices):
-                                mem_devices.append(d)
-
-                        # reset 各卡 peak stats
-                        for d in mem_devices:
-                            try:
-                                torch.cuda.reset_peak_memory_stats(d)
-                            except Exception as e:
-                                _log(f"[CADS][WARN] could not reset peak memory stats on {d}: {e}")
-
-                    t0 = time.perf_counter()
-
                     # Try passing height/width; if unsupported, call without and resize on save
-                    def _call_pipe():
-                        try:
-                            return pipe(
-                                prompt=ptxt,
-                                negative_prompt=(args.negative if args.negative else None),
-                                height=int(args.height), width=int(args.width),
-                                num_images_per_prompt=int(args.G),
-                                num_inference_steps=int(args.steps),
-                                guidance_scale=float(g),
-                                generator=gens,
-                                callback_on_step_end=cb,
-                                callback_on_step_end_tensor_inputs=["latents"],
-                                output_type="pil",
-                            )
-                        except TypeError:
-                            return pipe(
-                                prompt=ptxt,
-                                negative_prompt=(args.negative if args.negative else None),
-                                num_images_per_prompt=int(args.G),
-                                num_inference_steps=int(args.steps),
-                                guidance_scale=float(g),
-                                generator=gens,
-                                callback_on_step_end=cb,
-                                callback_on_step_end_tensor_inputs=["latents"],
-                                output_type="pil",
-                            )
-
-                    if args.profile_flops and torch_profiler is not None:
-                        activities = [torch_profiler.ProfilerActivity.CPU]
-                        if torch.cuda.is_available():
-                            activities.append(torch_profiler.ProfilerActivity.CUDA)
-                        try:
-                            with torch_profiler.profile(
-                                activities=activities,
-                                record_shapes=False,
-                                profile_memory=False,
-                                with_flops=True,
-                            ) as prof:
-                                result = _call_pipe()
-                            # 累积所有事件的 FLOPs
-                            try:
-                                flops_total = float(sum(
-                                    e.flops for e in prof.key_averages()
-                                    if hasattr(e, "flops") and e.flops is not None
-                                ))
-                            except Exception as e:
-                                _log(f"[CADS][WARN] failed to aggregate FLOPs: {e}")
-                                flops_total = -1.0
-                        except Exception as e:
-                            _log(f"[CADS][WARN] FLOPs profiling failed, fallback without FLOPs. Error: {e}")
-                            result = _call_pipe()
-                            flops_total = -1.0
-                    else:
-                        if args.profile_flops and torch_profiler is None:
-                            _log("[CADS][WARN] torch.profiler not available; FLOPs will be -1.")
-                        result = _call_pipe()
+                    try:
+                        result = pipe(
+                            prompt=ptxt,
+                            negative_prompt=(args.negative if args.negative else None),
+                            height=int(args.height), width=int(args.width),
+                            num_images_per_prompt=int(args.G),
+                            num_inference_steps=int(args.steps),
+                            guidance_scale=float(g),
+                            generator=gens,
+                            callback_on_step_end=cb,
+                            callback_on_step_end_tensor_inputs=["latents"],
+                            output_type="pil",
+                        )
+                    except TypeError:
+                        result = pipe(
+                            prompt=ptxt,
+                            negative_prompt=(args.negative if args.negative else None),
+                            num_images_per_prompt=int(args.G),
+                            num_inference_steps=int(args.steps),
+                            guidance_scale=float(g),
+                            generator=gens,
+                            callback_on_step_end=cb,
+                            callback_on_step_end_tensor_inputs=["latents"],
+                            output_type="pil",
+                        )
 
                     images = result.images if hasattr(result, "images") else result
                     _save_images(images, run_dir, (args.width, args.height))
-
-                    t1 = time.perf_counter()
-                    wall_time_total = float(t1 - t0)
-
-                    # 读取所有相关 GPU 上的峰值显存，取 max（MB）
-                    if mem_devices and torch.cuda.is_available():
-                        peaks_mb = []
-                        for d in mem_devices:
-                            try:
-                                peak_bytes = torch.cuda.max_memory_allocated(d)
-                                peaks_mb.append(float(peak_bytes) / (1024.0 ** 2))
-                            except Exception as e:
-                                _log(f"[CADS][WARN] failed to get peak memory on {d}: {e}")
-                        if peaks_mb:
-                            gpu_mem_peak_mb = max(peaks_mb)
-                        else:
-                            gpu_mem_peak_mb = -1.0
-                    else:
-                        gpu_mem_peak_mb = -1.0
-
-                    num_images = int(len(images)) if images is not None else 0
-                    wall_time_per_image = wall_time_total / num_images if num_images > 0 else -1.0
-                    flops_per_image = flops_total / num_images if (num_images > 0 and flops_total > 0) else -1.0
-
-                    # 写入 cost CSV
-                    cost_writer.writerow([
-                        args.method,
-                        concept,
-                        ptxt,
-                        int(sd),
-                        float(g),
-                        int(args.steps),
-                        num_images,
-                        int(args.height),
-                        int(args.width),
-                        args.dtype,
-                        args.device_transformer or "",
-                        args.device_vae or "",
-                        args.device_clip or "",
-                        f"{wall_time_total:.6f}",
-                        f"{wall_time_per_image:.6f}",
-                        f"{flops_total:.3f}",
-                        f"{flops_per_image:.3f}",
-                        f"{gpu_mem_peak_mb:.3f}",
-                    ])
-                    cost_f.flush()
-
-        cost_f.close()
 
     _log("[CADS] Done.")
 

@@ -17,15 +17,15 @@ import sys
 
 # ----------------- 在这里直接编辑你的 4 张图片路径 -----------------
 IMAGE_PATHS = [
-    "/mnt/data6t/yyz/flow_grpo/flow_base/outputs/ablation/wo_OP_RR/imgs/a_photo_of_a_bowl_seed1111_g5.0_s30/img_000.png",
-    "/mnt/data6t/yyz/flow_grpo/flow_base/outputs/ablation/wo_OP_RR/imgs/a_photo_of_a_bowl_seed1111_g5.0_s30/img_004.png",
-    "/mnt/data6t/yyz/flow_grpo/flow_base/outputs/ablation/wo_OP_RR/imgs/a_photo_of_a_bowl_seed1111_g5.0_s30/img_005.png",
-    "/mnt/data6t/yyz/flow_grpo/flow_base/outputs/ablation/wo_OP_RR/imgs/a_photo_of_a_bowl_seed3333_g5.0_s30/img_000.png",
+    "/data2/toby/OSCAR/outputs/try3_bowl/imgs/a_photo_of_a_bowl_seed1111_g5.0_s30/img_000.png",
+    "/data2/toby/OSCAR/outputs/try3_bowl/imgs/a_photo_of_a_bowl_seed1111_g5.0_s30/img_004.png",
+    "/data2/toby/OSCAR/outputs/try3_bowl/imgs/a_photo_of_a_bowl_seed1111_g5.0_s30/img_005.png",
+    "/data2/toby/OSCAR/outputs/try3_bowl/imgs/a_photo_of_a_bowl_seed3333_g5.0_s30/img_000.png",
 ]
 # -----------------------------------------------------------------
 # /mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_dining_table/imgs/a_dining_table_seed1111_g3.0_s30/01.png
 # /mnt/data6t/yyz/flow_grpo/flow_base/outputs/dpp_dining_table/imgs/a_dining_table_seed1111_g3.0_s30/08.png
-OUT_PDF = "results/ablation/wo_op_RR.pdf"
+OUT_PDF = "results/ablation/ourmethod.pdf"
 
 # MODE: "auto" / "cover" / "stretch" / "contain-pad"
 MODE = "auto"

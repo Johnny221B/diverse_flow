@@ -9,7 +9,8 @@ Grid evaluation for Particle Guidance (PG) on SD3.5 (Flow Matching).
 
 - Outputs:
   outputs/{method}_{concept}/
-    ├── eval/             # reserved for metrics
+    ├── eval/
+    │     └── {method}_{concept}_cost.csv     # 新增：开销统计
     └── imgs/
         └── {prompt_slug}_seed{SEED}_g{GUIDANCE}_s{STEPS}/
             00.png, 01.png, ...
@@ -21,12 +22,20 @@ import gc
 import json
 import os
 import sys
+import time
+import csv
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from collections import OrderedDict
 
 import torch
 from PIL import Image
+
+# 可选：torch.profiler 用于 FLOPs 统计
+try:
+    import torch.profiler as torch_profiler
+except Exception:
+    torch_profiler = None
 
 # Repo root for imports
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,7 +63,8 @@ def _parse_concepts_spec(spec: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
             if isinstance(p, str):
                 s = p.strip()
                 if s and s not in seen:
-                    seen.add(s); cleaned.append(s)
+                    seen.add(s)
+                    cleaned.append(s)
         if cleaned:
             concept_to_prompts[concept] = cleaned
     if not concept_to_prompts:
@@ -110,13 +120,13 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--negative", type=str, default=None)
 
     # Grid
-    p.add_argument("--G", type=int, default=4, help="Group size (images per prompt)")
+    p.add_argument("--G", type=int, default=32, help="Group size (images per prompt)")
     p.add_argument("--steps", type=int, default=30, help="#flow steps (NFE)")
     p.add_argument("--guidances", type=float, nargs="+", default=None,
                    help="List of cfg scales; e.g., 3.0 7.5 12.0")
     p.add_argument("--cfg", type=float, default=5.0,
                    help="Single cfg if --guidances is omitted")
-    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444])
+    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444, 5555, 6666])
 
     # Resolution
     p.add_argument("--height", type=int, default=512)
@@ -141,6 +151,13 @@ def build_args() -> argparse.Namespace:
     # For directory naming
     p.add_argument("--method", type=str, default="pg",
                    help="Method name for outputs/{method}_{concept}")
+
+    # Cost profiling
+    p.add_argument(
+        "--profile-flops",
+        action="store_true",
+        help="Use torch.profiler to estimate FLOPs per run (may add overhead)."
+    )
 
     return p.parse_args()
 
@@ -167,10 +184,16 @@ def main():
     for k, v in concept_to_prompts.items():
         print(f"[PG]   - {k}: {len(v)} prompts")
 
-    guidances = args.guidances if args.guidances is not None else [args.cfg]
-    guidances = [float(g) for g in guidances]
+    # Robust处理 guidances：支持 list / 单个 float / None
+    if isinstance(args.guidances, (list, tuple)):
+        guidances = [float(g) for g in args.guidances]
+    elif args.guidances is None:
+        guidances = [float(args.cfg)]
+    else:
+        guidances = [float(args.guidances)]
 
     dtype = torch.float16 if args.fp16 else torch.float32
+    dtype_str = "fp16" if args.fp16 else "fp32"
     device = torch.device(args.device)
 
     # Static PG config
@@ -188,6 +211,33 @@ def main():
         print(f"[PG] outputs base: {base_dir}")
         print(f"[PG] eval dir:     {eval_dir}")
         print(f"[PG] imgs root:    {imgs_root}")
+
+        # 准备 cost CSV：outputs/{method}_{concept}/eval/{method}_{concept}_cost.csv
+        cost_csv_path = eval_dir / f"{args.method}_{slugify(concept)}_cost.csv"
+        csv_new = not cost_csv_path.exists()
+        cost_f = open(cost_csv_path, "a", encoding="utf-8", newline="")
+        cost_writer = csv.writer(cost_f)
+        if csv_new:
+            cost_writer.writerow([
+                "method",
+                "concept",
+                "prompt",
+                "seed",
+                "guidance",
+                "steps",
+                "num_images",
+                "height",
+                "width",
+                "dtype",
+                "device_transformer",  # PG: 统一记成 args.device
+                "device_vae",
+                "device_clip",
+                "wall_time_total",
+                "wall_time_per_image",
+                "flops_total",
+                "flops_per_image",
+                "gpu_mem_peak_mb",
+            ])
 
         for g in guidances:
             # Build one sampler per (concept, guidance) and reuse for all prompts & seeds
@@ -216,14 +266,98 @@ def main():
                         )
                         print(f"[PG] sampling: concept='{concept}' | prompt='{ptxt}' | seed={sd} | cfg={g} | steps={args.steps} -> {out_dir}")
 
-                        with torch.inference_mode():
-                            images = sampler.generate(
-                                prompt=ptxt,
-                                negative_prompt=args.negative,
-                                num_images=args.G,
-                                seed=int(sd),
-                            )
+                        flops_total = -1.0
+                        gpu_mem_peak_mb = -1.0
+
+                        # reset peak memory on this device
+                        if torch.cuda.is_available() and device.type == "cuda":
+                            try:
+                                torch.cuda.reset_peak_memory_stats(device)
+                            except Exception as e:
+                                print(f"[PG][WARN] could not reset peak memory stats on {device}: {e}")
+
+                        t0 = time.perf_counter()
+
+                        def _run_generate():
+                            with torch.inference_mode():
+                                return sampler.generate(
+                                    prompt=ptxt,
+                                    negative_prompt=args.negative,
+                                    num_images=args.G,
+                                    seed=int(sd),
+                                )
+
+                        if args.profile_flops and torch_profiler is not None:
+                            activities = [torch_profiler.ProfilerActivity.CPU]
+                            if torch.cuda.is_available():
+                                activities.append(torch_profiler.ProfilerActivity.CUDA)
+                            try:
+                                with torch_profiler.profile(
+                                    activities=activities,
+                                    record_shapes=False,
+                                    profile_memory=False,
+                                    with_flops=True,
+                                ) as prof:
+                                    images = _run_generate()
+                                try:
+                                    flops_total = float(sum(
+                                        e.flops for e in prof.key_averages()
+                                        if hasattr(e, "flops") and e.flops is not None
+                                    ))
+                                except Exception as e:
+                                    print(f"[PG][WARN] failed to aggregate FLOPs: {e}")
+                                    flops_total = -1.0
+                            except Exception as e:
+                                print(f"[PG][WARN] FLOPs profiling failed, fallback without FLOPs. Error: {e}")
+                                images = _run_generate()
+                                flops_total = -1.0
+                        else:
+                            if args.profile_flops and torch_profiler is None:
+                                print("[PG][WARN] torch.profiler not available; FLOPs will be -1.")
+                            images = _run_generate()
+
                         _save_images(images, out_dir, (args.width, args.height))
+
+                        t1 = time.perf_counter()
+                        wall_time_total = float(t1 - t0)
+
+                        # 读取峰值显存
+                        if torch.cuda.is_available() and device.type == "cuda":
+                            try:
+                                peak_bytes = torch.cuda.max_memory_allocated(device)
+                                gpu_mem_peak_mb = float(peak_bytes) / (1024.0 ** 2)
+                            except Exception as e:
+                                print(f"[PG][WARN] failed to get peak memory on {device}: {e}")
+                                gpu_mem_peak_mb = -1.0
+                        else:
+                            gpu_mem_peak_mb = -1.0
+
+                        num_images = int(len(images)) if images is not None else 0
+                        wall_time_per_image = wall_time_total / num_images if num_images > 0 else -1.0
+                        flops_per_image = flops_total / num_images if (num_images > 0 and flops_total > 0) else -1.0
+
+                        # 写 cost 行（为了和 CADS / DPP 对齐，device_transformer 用 args.device，其它空）
+                        cost_writer.writerow([
+                            args.method,
+                            concept,
+                            ptxt,
+                            int(sd),
+                            float(g),
+                            int(args.steps),
+                            num_images,
+                            int(args.height),
+                            int(args.width),
+                            dtype_str,
+                            args.device,
+                            "",
+                            "",
+                            f"{wall_time_total:.6f}",
+                            f"{wall_time_per_image:.6f}",
+                            f"{flops_total:.3f}",
+                            f"{flops_per_image:.3f}",
+                            f"{gpu_mem_peak_mb:.3f}",
+                        ])
+                        cost_f.flush()
 
                         # Explicitly release references & cached memory between seeds
                         del images
@@ -233,6 +367,9 @@ def main():
                 # Release model/sampler for this guidance before moving to next
                 del sampler
                 _cuda_clear()
+                cost_f.flush()
+
+        cost_f.close()
 
     print("[PG] Done.")
 

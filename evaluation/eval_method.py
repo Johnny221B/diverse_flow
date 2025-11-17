@@ -801,25 +801,44 @@ def calculate_ms_ssim_diversity(folder: Path, max_pairs: int, device: torch.devi
     return float(1.0 - np.mean(scores))
 
 # --------- BRISQUE ----------
+# --------- BRISQUE ----------
 def calculate_brisque_quality(folder: Path, device: torch.device) -> Optional[float]:
     if piq is None:
         print("piq not installed; skip BRISQUE.")
         return None
+
+    # 收集所有 jpg/png
     paths = list(folder.rglob("*.jpg")) + list(folder.rglob("*.png"))
-    if not paths: return None
+    if not paths:
+        return None
+
     tfm = T.Compose([T.ToTensor()])
-    metric = piq.BRISQUELoss(data_range=1.0, reduction='none')
+    metric = piq.BRISQUELoss(data_range=1.0, reduction='none').to(device)
+
     scores = []
     for p in tqdm(paths, desc=f"BRISQUE: {folder.name}"):
         try:
             img = Image.open(p).convert("RGB")
         except Exception:
             continue
-        x = tfm(img).unsqueeze(0).to(device)
+
+        x = tfm(img).unsqueeze(0).to(device)  # [1,3,H,W], [0,1]
+
+        # ===== 关键补丁：跳过零方差图像 =====
+        # 如果整张图像像素方差为 0（全黑/全白/常数），piq 内部会 assert 报错
+        with torch.no_grad():
+            var = x.view(x.size(0), -1).var(dim=1)  # [1]
+        if torch.isclose(var, torch.zeros_like(var)).all():
+            print(f"[BRISQUE] skip zero-variance image: {p}")
+            continue
+        # ====================================
+
         with torch.inference_mode():
-            s = metric(x)
+            s = metric(x)  # tensor shape [1]
         scores.append(float(s.item()))
+
     return float(np.mean(scores)) if scores else None
+
 
 # --------- Evaluate one method_concept ----------
 def evaluate_one(gen_root: Path, method: str, concept: str, real_dir: Path,
@@ -961,9 +980,9 @@ def main():
                     help="Match pipeline CLIP image size (e.g., 224 or 336).")
 
     # 可选：自定义方法列表，默认只跑 dpp/pg/cads
-    ap.add_argument("--methods", nargs="+", default=["dpp","pg","cads","ourmethod"],
+    ap.add_argument("--methods", nargs="+", default=["modified","try"],
                     help="Methods to run (default: dpp pg cads). 'ours' will be ignored if included.")
-
+    # dpp pg cads ourmethod standardFM modified
     # === KID ===
     ap.add_argument("--kid-subset-size", type=int, default=1000,
                     help="Subset size per KID estimate (min(#real,#fake,#this)).")

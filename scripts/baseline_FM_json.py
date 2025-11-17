@@ -9,6 +9,9 @@ FM Baseline for SD3.5 (multi-seed, multi-guidance)
 - 遍历 concept × prompt × guidance × seed
 - 输出：outputs/<method>_<concept>/{eval,imgs}/
        imgs/<prompt_slug>_seed<SEED>_g<GUIDANCE>_s<STEPS>/img_000.png...
+- 记录 cost:
+       eval/<method>_<concept>_cost.csv
+       (wall time / FLOPs / peak GPU memory)
 
 保持不变：
 - 管线输出 latent，在 VAE 卡上手动 decode
@@ -23,13 +26,19 @@ python fm_sd35.py \
   --method ourmethod
 """
 
-import os, re, sys, time, json, argparse
+import os, re, sys, time, json, argparse, csv
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from collections import OrderedDict
 
 import torch
 import torch.nn as nn
+
+# 可选：torch.profiler 用于 FLOPs 统计
+try:
+    import torch.profiler as torch_profiler
+except Exception:
+    torch_profiler = None
 
 # -------------- small utils --------------
 
@@ -127,14 +136,14 @@ def parse_args():
     ap.add_argument('--negative', type=str, default='')
 
     # 生成参数
-    ap.add_argument('--G', type=int, default=64)
+    ap.add_argument('--G', type=int, default=32)
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
 
     # 多 guidance/seed（既支持 nargs 也支持逗号分隔）
     ap.add_argument('--guidances', nargs='*', default=[3.0, 5.0, 7.5], help='e.g. 3.0 5.0 7.5 OR "3.0,5.0,7.5"')
-    ap.add_argument('--seeds', nargs='*', default=[1111, 2222, 3333, 4444], help='e.g. 1111 2222 3333 4444 OR "1111,2222,..."')
+    ap.add_argument('--seeds', nargs='*', default=[4444, 5555, 6666], help='e.g. 1111 2222 3333 4444 OR "1111,2222,..."')
 
     # 模型路径
     ap.add_argument('--model-dir', type=str,
@@ -155,6 +164,13 @@ def parse_args():
 
     # 兼容：保留旧的 --out，但此脚本按你的规范总是写到 ../outputs/<method>_<concept>/
     ap.add_argument('--out', type=str, default=None)
+
+    # Cost profiling
+    ap.add_argument(
+        '--profile-flops',
+        action='store_true',
+        help='Use torch.profiler to estimate FLOPs per run (may add overhead).'
+    )
 
     return ap.parse_args()
 
@@ -188,6 +204,7 @@ def main():
     dev_tr  = torch.device(args.device_transformer)
     dev_vae = torch.device(args.device_vae)
     dtype   = torch.bfloat16 if dev_tr.type == 'cuda' else torch.float32
+    dtype_str = "bf16" if dtype == torch.bfloat16 else "fp32"
 
     # 加载模型并放置到目标设备
     model_dir = _resolve_model_dir(args.model_dir)
@@ -219,10 +236,53 @@ def main():
     # VAE scaling_factor
     sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
 
+    # 多卡显存统计：收集相关 CUDA devices
+    mem_devices: List[torch.device] = []
+    if torch.cuda.is_available():
+        dev_strs = set([args.device_transformer, args.device_vae])
+        for ds in dev_strs:
+            if ds is None:
+                continue
+            try:
+                d = torch.device(ds)
+            except Exception:
+                continue
+            if d.type != "cuda":
+                continue
+            if all(d != x for x in mem_devices):
+                mem_devices.append(d)
+
     # 遍历 concept × prompt × guidance × seed
     for concept, prompts in concept_to_prompts.items():
         base_root, imgs_root, eval_root = _outputs_root(project_root, args.method, concept)
         _log(f"[OUT] base={base_root}")
+
+        # cost CSV
+        cost_csv_path = os.path.join(eval_root, f"{args.method}_{_slugify(concept)}_cost.csv")
+        csv_new = not os.path.exists(cost_csv_path)
+        cost_f = open(cost_csv_path, "a", encoding="utf-8", newline="")
+        cost_writer = csv.writer(cost_f)
+        if csv_new:
+            cost_writer.writerow([
+                "method",
+                "concept",
+                "prompt",
+                "seed",
+                "guidance",
+                "steps",
+                "num_images",
+                "height",
+                "width",
+                "dtype",
+                "device_transformer",
+                "device_vae",
+                "device_clip",
+                "wall_time_total",
+                "wall_time_per_image",
+                "flops_total",
+                "flops_per_image",
+                "gpu_mem_peak_mb",
+            ])
 
         for prompt_text in prompts:
             for gval in guidances:
@@ -237,36 +297,124 @@ def main():
                     gen = torch.Generator(device=dev_tr) if dev_tr.type=='cuda' else torch.Generator()
                     gen.manual_seed(int(s))
 
-                    # 只出 latent，再到 VAE 卡 decode
-                    t0 = time.time()
-                    latents = pipe(
-                        prompt=prompt_text,
-                        negative_prompt=(args.negative if args.negative else None),
-                        height=args.height, width=args.width,
-                        num_images_per_prompt=args.G,
-                        num_inference_steps=args.steps,
-                        guidance_scale=float(gval),
-                        generator=gen,
-                        output_type="latent",
-                        return_dict=False,
-                    )[0]
+                    flops_total = -1.0
+                    gpu_mem_peak_mb = -1.0
 
-                    latents_vae = latents.to(dev_vae, non_blocking=True)
-                    with torch.inference_mode():
-                        images = pipe.vae.decode(latents_vae / sf, return_dict=False)[0]   # [-1,1]
-                        images = (images.float().clamp(-1,1) + 1.0) / 2.0                  # [0,1]
+                    # reset 各卡 peak stats
+                    if mem_devices and torch.cuda.is_available():
+                        for d in mem_devices:
+                            try:
+                                torch.cuda.reset_peak_memory_stats(d)
+                            except Exception as e:
+                                _log(f"[FM][WARN] could not reset peak memory stats on {d}: {e}")
+
+                    def _generate_once():
+                        # 只出 latent，再到 VAE 卡 decode
+                        latents = pipe(
+                            prompt=prompt_text,
+                            negative_prompt=(args.negative if args.negative else None),
+                            height=args.height, width=args.width,
+                            num_images_per_prompt=args.G,
+                            num_inference_steps=args.steps,
+                            guidance_scale=float(gval),
+                            generator=gen,
+                            output_type="latent",
+                            return_dict=False,
+                        )[0]
+
+                        latents_vae = latents.to(dev_vae, non_blocking=True)
+                        with torch.inference_mode():
+                            images = pipe.vae.decode(latents_vae / sf, return_dict=False)[0]   # [-1,1]
+                            images = (images.float().clamp(-1,1) + 1.0) / 2.0                  # [0,1]
+
+                        return latents, latents_vae, images
+
+                    t0 = time.perf_counter()
+
+                    # FLOPs profiling（可选）
+                    if args.profile_flops and torch_profiler is not None:
+                        activities = [torch_profiler.ProfilerActivity.CPU]
+                        if torch.cuda.is_available():
+                            activities.append(torch_profiler.ProfilerActivity.CUDA)
+                        try:
+                            with torch_profiler.profile(
+                                activities=activities,
+                                record_shapes=False,
+                                profile_memory=False,
+                                with_flops=True,
+                            ) as prof:
+                                latents, latents_vae, images = _generate_once()
+                            try:
+                                flops_total = float(sum(
+                                    e.flops for e in prof.key_averages()
+                                    if hasattr(e, "flops") and e.flops is not None
+                                ))
+                            except Exception as e:
+                                _log(f"[FM][WARN] failed to aggregate FLOPs: {e}")
+                                flops_total = -1.0
+                        except Exception as e:
+                            _log(f"[FM][WARN] FLOPs profiling failed, fallback without FLOPs. Error: {e}")
+                            latents, latents_vae, images = _generate_once()
+                            flops_total = -1.0
+                    else:
+                        if args.profile_flops and torch_profiler is None:
+                            _log("[FM][WARN] torch.profiler not available; FLOPs will be -1.")
+                        latents, latents_vae, images = _generate_once()
 
                     # 保存
                     for i in range(images.size(0)):
                         save_image(images[i].cpu(), os.path.join(run_dir, f"img_{i:03d}.png"))
-                    t1 = time.time()
 
-                    _log(f"Saved {images.size(0)} images -> {run_dir} | time={t1-t0:.2f}s")
+                    t1 = time.perf_counter()
+                    wall_time_total = float(t1 - t0)
+                    num_images = int(images.size(0)) if images is not None else 0
+                    wall_time_per_image = wall_time_total / num_images if num_images > 0 else -1.0
+                    flops_per_image = flops_total / num_images if (num_images > 0 and flops_total > 0) else -1.0
+
+                    # 读取多卡峰值显存
+                    if mem_devices and torch.cuda.is_available():
+                        peaks_mb = []
+                        for d in mem_devices:
+                            try:
+                                peak_bytes = torch.cuda.max_memory_allocated(d)
+                                peaks_mb.append(float(peak_bytes) / (1024.0 ** 2))
+                            except Exception as e:
+                                _log(f"[FM][WARN] failed to get peak memory on {d}: {e}")
+                        gpu_mem_peak_mb = max(peaks_mb) if peaks_mb else -1.0
+                    else:
+                        gpu_mem_peak_mb = -1.0
+
+                    _log(f"Saved {num_images} images -> {run_dir} | time={wall_time_total:.2f}s | peak_mem={gpu_mem_peak_mb:.1f}MB")
+
+                    # 写 cost 行（device_clip 为空字符串，对齐其它脚本）
+                    cost_writer.writerow([
+                        args.method,
+                        concept,
+                        prompt_text,
+                        int(s),
+                        float(gval),
+                        int(args.steps),
+                        num_images,
+                        int(args.height),
+                        int(args.width),
+                        dtype_str,
+                        args.device_transformer or "",
+                        args.device_vae or "",
+                        "",
+                        f"{wall_time_total:.6f}",
+                        f"{wall_time_per_image:.6f}",
+                        f"{flops_total:.3f}",
+                        f"{flops_per_image:.3f}",
+                        f"{gpu_mem_peak_mb:.3f}",
+                    ])
+                    cost_f.flush()
 
                     # 适度清理
                     del latents, latents_vae, images
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
+
+        cost_f.close()
 
 if __name__ == "__main__":
     main()

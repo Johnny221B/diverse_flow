@@ -6,25 +6,18 @@
 #
 # Grid 模式输出:
 #   outputs/{method}_{concept}/imgs/{prompt_slug}_seed{seed}_g{guidance}_s{steps}/
-#   outputs/{method}_{concept}/eval/{method}_{concept}_cost.csv   # 新增：cost 统计
 #
 # ImageNet-400 模式输出:
 #   outputs/imagenet_400/{method}/cls_000.png ... cls_399.png
 # =============================
 
-import os, sys, argparse, random, re, json, time, csv
+import os, sys, argparse, random, re, json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from collections import OrderedDict
 
 import torch
 from PIL import Image
-
-# 可选：torch.profiler 用于 FLOPs 统计
-try:
-    import torch.profiler as torch_profiler
-except Exception:
-    torch_profiler = None
 
 THIS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = THIS_DIR.parent
@@ -123,12 +116,12 @@ def parse_args():
                    help="单条 prompt（若未提供 --spec / --imagenet-json 时可用）")
 
     # 网格 (Grid 模式使用)
-    p.add_argument("--K", type=int, default=4, help="每个 prompt 生成 K 张（组内联动做 DPP）")
+    p.add_argument("--K", type=int, default=1, help="每个 prompt 生成 K 张（组内联动做 DPP）")
     p.add_argument("--steps", type=int, default=30)
     p.add_argument("--guidances", type=float, nargs="+", default=None,
                    help="multi guidance (grid mode)")
     p.add_argument("--guidance", type=float, default=3.0, help="single choice; 也用于 ImageNet 模式")
-    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444, 5555, 6666],
+    p.add_argument("--seeds", type=int, nargs="+", default=[42],
                    help="grid 模式的 seeds 列表；ImageNet 模式若未显式指定 --seed，则用 seeds[0] 作为 base_seed")
     p.add_argument("--seed", type=int, default=42,
                    help="ImageNet-400 模式 base_seed（若不指定则用 seeds[0]）")
@@ -164,13 +157,6 @@ def parse_args():
 
     # 方法名（用于落盘目录）
     p.add_argument("--method", type=str, default="dpp")
-
-    # cost profiling
-    p.add_argument(
-        "--profile-flops",
-        action="store_true",
-        help="使用 torch.profiler 估计单次 run 的 FLOPs（会有一定额外开销）"
-    )
 
     return p.parse_args()
 
@@ -231,13 +217,8 @@ def build_all(args):
 # Sampling (one prompt × one guidance × one seed) for Grid 模式
 # ------------------------
 def run_one(pipe, coupler, device_tr: torch.device, prompt: str, K: int, steps: int,
-            guidance: float, seed: int, target_wh: Tuple[int,int], out_dir: Path,
-            profile_flops: bool = False,
-            mem_devices: List[torch.device] | None = None) -> Tuple[int, float, float, float]:
-    """
-    对单个 prompt / guidance / seed 进行一次 K 组联动采样，并保存到 out_dir
-    返回: (num_images, wall_time_total, flops_total, gpu_mem_peak_mb)
-    """
+            guidance: float, seed: int, target_wh: Tuple[int,int], out_dir: Path):
+    """对单个 prompt / guidance / seed 进行一次 K 组联动采样，并保存到 out_dir"""
     W, H = int(target_wh[0]), int(target_wh[1])
 
     # DPP 更新回调：最后一步把 latent 搬到 VAE 卡/精度
@@ -269,54 +250,11 @@ def run_one(pipe, coupler, device_tr: torch.device, prompt: str, K: int, steps: 
         output_type="pil",
     )
 
-    def _call_pipe():
-        try:
-            return pipe(height=H, width=W, **kwargs)
-        except TypeError:
-            return pipe(**kwargs)
-
-    flops_total = -1.0
-    gpu_mem_peak_mb = -1.0
-
-    # 多卡：重置所有相关 device 的 peak stats
-    if mem_devices and torch.cuda.is_available():
-        for d in mem_devices:
-            try:
-                torch.cuda.reset_peak_memory_stats(d)
-            except Exception as e:
-                print(f"[DPP][WARN] could not reset peak memory stats on {d}: {e}")
-
-    t0 = time.perf_counter()
-
-    if profile_flops and torch_profiler is not None:
-        activities = [torch_profiler.ProfilerActivity.CPU]
-        if torch.cuda.is_available():
-            activities.append(torch_profiler.ProfilerActivity.CUDA)
-        try:
-            with torch_profiler.profile(
-                activities=activities,
-                record_shapes=False,
-                profile_memory=False,
-                with_flops=True,
-            ) as prof:
-                result = _call_pipe()
-            # 累积所有事件的 FLOPs
-            try:
-                flops_total = float(sum(
-                    e.flops for e in prof.key_averages()
-                    if hasattr(e, "flops") and e.flops is not None
-                ))
-            except Exception as e:
-                print(f"[DPP][WARN] failed to aggregate FLOPs: {e}")
-                flops_total = -1.0
-        except Exception as e:
-            print(f"[DPP][WARN] FLOPs profiling failed, fallback without FLOPs. Error: {e}")
-            result = _call_pipe()
-            flops_total = -1.0
-    else:
-        if profile_flops and torch_profiler is None:
-            print("[DPP][WARN] torch.profiler not available; FLOPs will be -1.")
-        result = _call_pipe()
+    # (尽量) 直接让 pipeline 生成指定尺寸；某些分支若不支持 height/width，会在 except 中回退到保存前 resize
+    try:
+        result = pipe(height=H, width=W, **kwargs)
+    except TypeError:
+        result = pipe(**kwargs)
 
     imgs = result.images if hasattr(result, "images") else result
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -328,28 +266,6 @@ def run_one(pipe, coupler, device_tr: torch.device, prompt: str, K: int, steps: 
         if img.size != (W, H):
             img = img.resize((W, H), resample=Image.BICUBIC)
         img.save(out_dir / f"{i:02d}.png")
-
-    t1 = time.perf_counter()
-    wall_time_total = float(t1 - t0)
-    num_images = int(len(imgs)) if imgs is not None else 0
-
-    # 读取所有相关 GPU 的峰值显存，取 max（MB）
-    if mem_devices and torch.cuda.is_available():
-        peaks_mb = []
-        for d in mem_devices:
-            try:
-                peak_bytes = torch.cuda.max_memory_allocated(d)
-                peaks_mb.append(float(peak_bytes) / (1024.0 ** 2))
-            except Exception as e:
-                print(f"[DPP][WARN] failed to get peak memory on {d}: {e}")
-        if peaks_mb:
-            gpu_mem_peak_mb = max(peaks_mb)
-        else:
-            gpu_mem_peak_mb = -1.0
-    else:
-        gpu_mem_peak_mb = -1.0
-
-    return num_images, wall_time_total, flops_total, gpu_mem_peak_mb
 
 
 # ------------------------
@@ -441,7 +357,6 @@ def main():
             del imgs, img
 
         print("[DPP][ImageNet-400] Done.")
-        # 如有需要，也可以类似 grid 模式添加 imagenet_400 的 cost 统计 CSV
         return
 
     # =============== 模式 A：原始 Grid 多 prompt × guidance × seed ===============
@@ -464,56 +379,11 @@ def main():
     pipe, coupler, dev_tr = build_all(args)
     print(f"[DPP] ready. dtype={dtype}, K={args.K}, steps={args.steps}, W×H={args.width}×{args.height}")
 
-    dtype_str = "fp16" if args.fp16 else "fp32"
-
-    # 构建一次 mem_devices （多卡显存统计用）
-    mem_devices: List[torch.device] = []
-    if torch.cuda.is_available():
-        dev_strs = set([args.device_transformer, args.device_vae, args.device_clip])
-        for ds in dev_strs:
-            if ds is None:
-                continue
-            try:
-                d = torch.device(ds)
-            except Exception:
-                continue
-            if d.type != "cuda":
-                continue
-            if all(d != x for x in mem_devices):
-                mem_devices.append(d)
-
     # 按 concept 分开在 outputs/{method}_{concept} 下落盘
     for concept, prompts in concept_to_prompts.items():
-        base_dir, imgs_root, eval_dir = _build_root_out(args.method, concept)
-        print(f"[DPP] outputs base: {base_dir}")
+        _, imgs_root, eval_dir = _build_root_out(args.method, concept)
+        print(f"[DPP] outputs base: {imgs_root.parent}")
         print(f"[DPP] eval dir:     {eval_dir}")
-
-        # 每个 concept 一个 cost 文件: {method}_{concept}_cost.csv
-        cost_csv_path = eval_dir / f"{args.method}_{_slugify(concept)}_cost.csv"
-        csv_new = not cost_csv_path.exists()
-        cost_f = open(cost_csv_path, "a", encoding="utf-8", newline="")
-        cost_writer = csv.writer(cost_f)
-        if csv_new:
-            cost_writer.writerow([
-                "method",
-                "concept",
-                "prompt",
-                "seed",
-                "guidance",
-                "steps",
-                "num_images",
-                "height",
-                "width",
-                "dtype",
-                "device_transformer",
-                "device_vae",
-                "device_clip",
-                "wall_time_total",
-                "wall_time_per_image",
-                "flops_total",
-                "flops_per_image",
-                "gpu_mem_peak_mb",  # 新增：多卡取 max 峰值显存
-            ])
 
         for ptext in prompts:
             p_slug = _slugify(ptext)  # prompt 的文件夹名基底
@@ -521,43 +391,11 @@ def main():
                 for s in args.seeds:
                     subdir = imgs_root / f"{p_slug}_seed{s}_g{g}_s{args.steps}"
                     print(f"[DPP] sampling: concept='{concept}' | prompt='{ptext}' | seed={s} | guidance={g} | steps={args.steps} -> {subdir}")
-
-                    num_images, wall_time_total, flops_total, gpu_mem_peak_mb = run_one(
-                        pipe, coupler, dev_tr,
-                        prompt=ptext, K=args.K, steps=args.steps,
-                        guidance=float(g), seed=int(s),
-                        target_wh=(args.width, args.height),
-                        out_dir=subdir,
-                        profile_flops=args.profile_flops,
-                        mem_devices=mem_devices,
-                    )
-
-                    wall_time_per_image = wall_time_total / num_images if num_images > 0 else -1.0
-                    flops_per_image = flops_total / num_images if (num_images > 0 and flops_total > 0) else -1.0
-
-                    cost_writer.writerow([
-                        args.method,
-                        concept,
-                        ptext,
-                        int(s),
-                        float(g),
-                        int(args.steps),
-                        num_images,
-                        int(args.width),
-                        int(args.height),
-                        dtype_str,
-                        args.device_transformer or "",
-                        args.device_vae or "",
-                        args.device_clip or "",
-                        f"{wall_time_total:.6f}",
-                        f"{wall_time_per_image:.6f}",
-                        f"{flops_total:.3f}",
-                        f"{flops_per_image:.3f}",
-                        f"{gpu_mem_peak_mb:.3f}",
-                    ])
-                    cost_f.flush()
-
-        cost_f.close()
+                    run_one(pipe, coupler, dev_tr,
+                            prompt=ptext, K=args.K, steps=args.steps,
+                            guidance=float(g), seed=int(s),
+                            target_wh=(args.width, args.height),
+                            out_dir=subdir)
 
     print("[DPP] Done.")
 

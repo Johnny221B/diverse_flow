@@ -3,28 +3,32 @@
 
 """
 Diverse SD3.5 (no-embeds, TE=Transformer device, METHOD-CONSISTENT)
-[with A+B noise + safe init-orthogonal injection + (可稀疏) volume guidance]
+[with A+B noise + safe init-orthogonal injection + Heun-style endpoint volume]
 
 特点：
 - 单次生成：指定 prompt，G 张图，固定 steps
-- 回调：VAE 解码 -> CLIP 体积损失（在当前 latent 上）-> VJP 回 latent -> 写回
+- 回调：VAE 解码 -> CLIP 体积损失（在 Heun 预测 latent 上）-> VJP 回 latent -> 写回
 - 确定性项（体积漂移）仅受 gamma(t)（t_gate+sched_shape）调度
 - 噪声：SDE/Brownian 对齐 + 相对 SNR 目标（早强/晚强可配）
 - 第 0 步对 latent 混入批内正交噪声（可开关 + 强度可调，默认 blend）
 
-新增：
-- 支持 --spec 指向 JSON: { "bowl":[...], "truck":[...], ... }
+新增（适配 ImageNet-400 prompts）：
+- 支持 --spec 指向 JSON: { "imagenet_400":[...], "truck":[...], ... }
+  顶层是 concept，value 是该 concept 下的一组 prompts（列表）
 - 支持多 seed：--seeds "1111,2222"
 - 支持多 guidance：--guidances "3.0,5.0"
 - 遍历 concept × prompt × guidance × seed
-- 支持 --volume-every N：每 N 步做一次 CLIP volume（N=1 等价原版本）
 - 输出：outputs/<method>_<concept>/{eval,imgs}/
        imgs/<prompt_slug>_seed<SEED>_g<GUIDANCE>_s<STEPS>/img_000.png...
-- 记录 cost：
-  eval/<method>_<concept>_cost.csv，字段：
-  method,concept,prompt,seed,guidance,steps,num_images,height,width,
-  dtype,device_transformer,device_vae,device_clip,
-  wall_time_total,wall_time_per_image,flops_total,flops_per_image,gpu_mem_peak_mb
+
+典型用法（ImageNet-400 单样本）：
+  python oscar_imagenet400.py \
+    --spec ./specs/imagenet_400_prompts.json \
+    --G 1 --steps 30 \
+    --guidances 5.0 \
+    --seeds 1111 \
+    --model-dir ../models/stable-diffusion-3.5-medium \
+    --method oscar
 """
 
 import os
@@ -34,7 +38,6 @@ import time
 import argparse
 import traceback
 import json
-import csv
 from typing import Any, Dict, Optional, List
 from collections import OrderedDict
 
@@ -42,16 +45,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# 可选：torch.profiler 用于 FLOPs 统计
-try:
-    import torch.profiler as torch_profiler
-except Exception:
-    torch_profiler = None
-
 
 # -------------------- utils --------------------
 
 def _gb(x): return f"{x/1024**3:.2f} GB"
+
 
 def print_mem_all(tag: str, devices: list):
     lines = [f"[{tag}]"]
@@ -63,6 +61,7 @@ def print_mem_all(tag: str, devices: list):
         else:
             lines.append(f"  {d}: CPU")
     print("\n".join(lines), flush=True)
+
 
 def _first_device_of_module(m: nn.Module):
     if not isinstance(m, nn.Module):
@@ -77,6 +76,7 @@ def _first_device_of_module(m: nn.Module):
         for b in sm.buffers(recurse=False):
             return b.device
     return None
+
 
 def inspect_pipe_devices(pipe):
     names = [
@@ -100,6 +100,7 @@ def inspect_pipe_devices(pipe):
             report[name] = "non-module"
     print("[pipe-devices]", report, flush=True)
 
+
 def assert_on(m, want):
     if not isinstance(m, nn.Module):
         return
@@ -110,16 +111,19 @@ def assert_on(m, want):
         if str(b.device) != str(want):
             raise RuntimeError(f"Buffer on {b.device}, expected {want}")
 
+
 def _log(s, debug=True):
     ts = time.strftime("%H:%M:%S")
     if debug:
         print(f"[{ts}] {s}", flush=True)
+
 
 def _slugify(text: str, maxlen: int = 120) -> str:
     s = re.sub(r'\s+', '_', text.strip())
     s = re.sub(r'[^A-Za-z0-9._-]+', '', s)
     s = re.sub(r'_{2,}', '_', s).strip('._-')
     return s[:maxlen] if maxlen and len(s) > maxlen else s
+
 
 def _resolve_model_dir(path: str) -> str:
     p = os.path.abspath(path)
@@ -129,6 +133,40 @@ def _resolve_model_dir(path: str) -> str:
         if 'model_index.json' in files:
             return root
     raise FileNotFoundError(f'Could not find model_index.json under {path}')
+
+
+def _parse_concepts_spec(obj: Dict[str, Any]) -> "OrderedDict[str, List[str]]":
+    """
+    严格解析 {concept: [prompts...]} 结构，用于 ImageNet-400 等：
+      {
+        "imagenet_400": ["a photo of a tench", "a photo of a goldfish", ...],
+        "truck": [...],
+        ...
+      }
+    返回有序字典，保留文件中 concept 和 prompt 的顺序，并对 prompt 去重。
+    """
+    if not isinstance(obj, dict):
+        raise ValueError("Spec must be a JSON object: {concept: [prompts...]}")
+
+    concept_to_prompts: "OrderedDict[str, List[str]]" = OrderedDict()
+    for concept, plist in obj.items():
+        if not isinstance(concept, str):
+            continue
+        if not isinstance(plist, (list, tuple)):
+            continue
+        seen, cleaned = set(), []
+        for p in plist:
+            if isinstance(p, str):
+                s = p.strip()
+                if s and s not in seen:
+                    seen.add(s)
+                    cleaned.append(s)
+        if cleaned:
+            concept_to_prompts[concept] = cleaned
+
+    if not concept_to_prompts:
+        raise ValueError("No valid {concept: [prompts...]} found in spec.")
+    return concept_to_prompts
 
 
 # -------------------- args --------------------
@@ -142,7 +180,7 @@ def parse_args():
     ap.add_argument('--prompt', type=str, default=None,
                     help='单个 prompt；如指定 --spec 则忽略此项')
     ap.add_argument('--negative', type=str, default='')
-    ap.add_argument('--G', type=int, default=32)
+    ap.add_argument('--G', type=int, default=1)
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
@@ -152,14 +190,19 @@ def parse_args():
     ap.add_argument('--guidance', type=float, default=5.0)
 
     # 多个 seed / guidance
-    ap.add_argument('--seeds', type=str, default="1111,2222,3333,4444,5555,6666",
+    ap.add_argument('--seeds', type=str, default="1111,3333,4444,5555,6666,7777",
                     help='多 seed，逗号分隔，如 "1111,2222,3333"')
     ap.add_argument('--guidances', type=str, default=None,
                     help='多 guidance，逗号分隔，如 "3.0,5.0"')
 
-    # JSON spec：{ "bowl": ["a photo of a bowl", ...], ... }
-    ap.add_argument('--spec', type=str, default=None,
-                    help='JSON 文件路径，内容为 { "concept": ["prompt1", "prompt2", ...], ... }')
+    # JSON spec：{ "imagenet_400": ["a photo of a tench", ...], ... }
+    ap.add_argument(
+        '--spec',
+        type=str,
+        default='/data2/toby/OSCAR/imagenet_400_prompts.json',
+        help='JSON 文件路径，内容为 { "concept": ["prompt1", "prompt2", ...], ... }'
+    )
+
 
     # 本地模型路径
     ap.add_argument('--model-dir', type=str,
@@ -168,28 +211,36 @@ def parse_args():
 
     # 输出与方法名
     ap.add_argument('--out', type=str, default=None)
-    ap.add_argument('--method', type=str, default='modified')
+    ap.add_argument('--method', type=str, default='noise')
 
     # 多样性目标（方法相关）
-    ap.add_argument('--gamma0', type=float, default=0.06)
-    ap.add_argument('--gamma-max-ratio', type=float, default=0.10)
+    ap.add_argument('--gamma0', type=float, default=0.12)
+    ap.add_argument('--gamma-max-ratio', type=float, default=0.30)
 
-    # 正交/门控
+    # 正交/门控（只影响确定性体积项）
     ap.add_argument('--partial-ortho', type=float, default=0.95)
     ap.add_argument('--t-gate', type=str, default='0.60,0.99')
     ap.add_argument('--sched-shape', type=str, default='sin2', choices=['sin2', 't1mt'])
     ap.add_argument('--tau', type=float, default=1.0)
     ap.add_argument('--eps-logdet', type=float, default=1e-3)
 
-    # 噪声时间形态：early=前期强，late=后期强
+    # 噪声时间形态：early=前期强，late=后期强（只控制 rho_t，不控制开关）
     ap.add_argument('--noise-timing', type=str, default='early', choices=['early', 'late'])
 
+    # 噪声时间窗：只在 t_norm ∈ [low, high] 内加噪声，并且在该区间内线性衰减
+    ap.add_argument(
+        '--noise-gate',
+        type=str,
+        default='0.50,1.00',
+        help='噪声时间窗 [low, high] in t_norm (0~1)，区间外噪声为 0，区间内从 early→late 线性衰减'
+    )
+
     # 噪声控制（A+B）
-    ap.add_argument('--eta-sde', type=float, default=5,
+    ap.add_argument('--eta-sde', type=float, default=5.0,
                     help='SDE/Brownian 噪声强度 (与 scheduler 对齐)')
-    ap.add_argument('--rho0', type=float, default=2.5,
+    ap.add_argument('--rho0', type=float, default=4.0,
                     help='相对 SNR 目标（早期）')
-    ap.add_argument('--rho1', type=float, default=0.5,
+    ap.add_argument('--rho1', type=float, default=2.0,
                     help='相对 SNR 目标（末期）')
     ap.add_argument('--noise-partial-ortho', type=float, default=1.0,
                     help='噪声相对基流的正交比例')
@@ -200,7 +251,7 @@ def parse_args():
     ap.add_argument('--init-ortho', type=float, default=0.2,
                     help='第0步向latent混入正交噪声的强度（0关闭，建议0.1~0.3）')
     ap.add_argument('--init-ortho-mode', type=str, default='blend',
-                    choices=['blend','off','replace'],
+                    choices=['blend', 'off', 'replace'],
                     help='init-ortho 注入方式：blend=混入；replace=线性替换；off=关闭')
 
     # 设备
@@ -215,23 +266,7 @@ def parse_args():
     ap.add_argument('--enable-vae-tiling', action='store_true')
     ap.add_argument('--enable-xformers', action='store_true')
     ap.add_argument('--debug', action='store_true')
-
-    # Volume guidance 频率
-    ap.add_argument(
-        '--volume-every',
-        type=int,
-        default=1,
-        help='apply volume guidance every N steps (1 = every step, 2 = every other step, ...)'
-    )
-
-    # Cost profiling
-    ap.add_argument(
-        '--profile-flops',
-        action='store_true',
-        help='Use torch.profiler to estimate FLOPs per run (may add overhead).'
-    )
-
-    return ap.args if hasattr(ap, "args") else ap.parse_args()
+    return ap.parse_args()
 
 
 # -------------------- main --------------------
@@ -268,6 +303,10 @@ def main():
     else:
         guidance_list = [args.guidance]
 
+    # 解析 noise gate
+    ng0, ng1 = [float(x) for x in args.noise_gate.split(',')]
+    noise_gate = (min(ng0, ng1), max(ng0, ng1))
+
     try:
         import torch.backends.cudnn as cudnn
         from torch.utils.checkpoint import checkpoint
@@ -285,33 +324,11 @@ def main():
         dev_vae = torch.device(args.device_vae)
         dev_clip= torch.device(args.device_clip)
         dtype   = torch.bfloat16 if dev_tr.type == 'cuda' else torch.float32
-        if dtype == torch.bfloat16:
-            dtype_str = "bf16"
-        elif dtype == torch.float16:
-            dtype_str = "fp16"
-        else:
-            dtype_str = "fp32"
 
         _log(f"Devices: transformer={dev_tr}, vae={dev_vae}, clip={dev_clip}", args.debug)
         _log(f"Model dir: {args.model_dir}", args.debug)
         _log(f"CLIP JIT: {args.clip_jit}", args.debug)
         print_mem_all("before-pipeline-call", [dev_tr, dev_vae, dev_clip])
-
-        # 用于显存统计的 CUDA devices（去重）
-        mem_devices: List[torch.device] = []
-        if torch.cuda.is_available():
-            dev_strs = {args.device_transformer, args.device_vae, args.device_clip}
-            for ds in dev_strs:
-                if ds is None:
-                    continue
-                try:
-                    d = torch.device(ds)
-                except Exception:
-                    continue
-                if d.type != "cuda":
-                    continue
-                if all(d != x for x in mem_devices):
-                    mem_devices.append(d)
 
         # ===== 1) CPU 加载，再手动上卡 =====
         model_dir = _resolve_model_dir(args.model_dir)
@@ -357,11 +374,11 @@ def main():
         )
         _log("CLIP ready.", args.debug)
 
-        t0_gate, t1_gate = args.t_gate.split(',')
+        t0, t1 = args.t_gate.split(',')
         cfg = DiversityConfig(
             num_steps=args.steps, tau=args.tau, eps_logdet=args.eps_logdet,
             gamma0=args.gamma0, gamma_max_ratio=args.gamma_max_ratio,
-            partial_ortho=args.partial_ortho, t_gate=(float(t0_gate), float(t1_gate)),
+            partial_ortho=args.partial_ortho, t_gate=(float(t0), float(t1)),
             sched_shape=args.sched_shape, clip_image_size=224,
             leverage_alpha=0.5,
         )
@@ -394,6 +411,7 @@ def main():
             out = pipe.vae.decode(z / sf, return_dict=False)[0]    # [-1,1]
             return (out.float().clamp(-1,1) + 1.0) / 2.0           # [0,1]
 
+        # 修正后的 Brownian std：使用 cur^2 - nxt^2
         def _brownian_std_from_scheduler(ppl, i):
             sch = ppl.scheduler
             try:
@@ -401,7 +419,7 @@ def main():
                     s = sch.sigmas.float()
                     cur = s[i].item()
                     nxt = s[i+1].item() if i+1 < len(s) else s[i].item()
-                    var = max(nxt**2 - cur**2, 0.0)
+                    var = max(cur**2 - nxt**2, 0.0)
                     return float(var**0.5)
                 elif hasattr(sch, "alphas_cumprod"):
                     ac = sch.alphas_cumprod.float()
@@ -409,7 +427,7 @@ def main():
                     nxt = ac[i+1].item() if i+1 < len(ac) else ac[i].item()
                     sig2_cur = max(1.0 - cur, 0.0)
                     sig2_nxt = max(1.0 - nxt, 0.0)
-                    var = max(sig2_nxt - sig2_cur, 0.0)
+                    var = max(sig2_cur - sig2_nxt, 0.0)
                     return float(var**0.5)
             except Exception:
                 pass
@@ -424,8 +442,8 @@ def main():
             B = x.size(0)
             M = x[0].numel()
             y = torch.randn(B, M, device=x.device, dtype=torch.float32)  # [B, M]
-            Q, _ = torch.linalg.qr(y.t(), mode='reduced')  # [M, B]
-            Qb = Q.t().to(dtype=x.dtype).contiguous().view_as(x)  # [B, C, H, W]
+            Q, _ = torch.linalg.qr(y.t(), mode='reduced')                # [M, B]
+            Qb = Q.t().to(dtype=x.dtype).contiguous().view_as(x)         # [B, C, H, W]
             return Qb
 
         def _inject_init_ortho(latents: torch.Tensor, strength: float, mode: str = 'blend') -> torch.Tensor:
@@ -445,7 +463,7 @@ def main():
 
             return out
 
-        # ===== 回调：一步步注入多样性（已去掉 Heun endpoint，支持稀疏 volume 指导） =====
+        # ===== 回调：一步步注入多样性（带 Heun 预测端点） =====
         def diversity_callback(ppl, i, t, kw):
             ts = ppl.scheduler.timesteps
             t_cur  = float(ts[i].item())
@@ -454,9 +472,14 @@ def main():
             t_norm = (t_cur - t_min) / (t_max - t_min + 1e-8)
             dt_unit = abs(t_cur - t_next) / (abs(t_max - t_min) + 1e-8)
 
-            # 控制 volume guidance 的频率：1 = 每步都做（等价原版）
-            volume_every = max(1, int(getattr(args, "volume_every", 1)))
-            do_volume = (i % volume_every == 0)
+            # 噪声时间权重：在 noise_gate 区间内从 0 -> 1 线性变换
+            ng0, ng1 = noise_gate
+            if t_norm <= ng0:
+                noise_w = 0.0
+            elif t_norm >= ng1:
+                noise_w = 1.0
+            else:
+                noise_w = (t_norm - ng0) / (ng1 - ng0 + 1e-8)
 
             # 第 0 步：安全混入批内正交噪声
             if i == 0 and "latents" in kw and kw["latents"] is not None:
@@ -472,15 +495,15 @@ def main():
 
             # γ 仅用于确定性体积漂移（gating by t_gate）
             gamma_sched = cfg.gamma0 * time_sched_factor(t_norm, cfg.t_gate, cfg.sched_shape)
-            if gamma_sched <= 0:
+
+            # 如果 drift 和 noise 都完全关闭，就只更新状态、提前退出
+            if (gamma_sched <= 0.0) and (noise_w <= 1e-8):
                 state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
                 state["prev_latents_vae_cpu"] = lat.detach().to("cpu")
                 state["prev_dt_unit"] = dt_unit
                 return kw
 
             lat_new = lat.clone()
-
-            # 把本步 latent 搬到 VAE 卡
             lat_vae_full = lat.detach().to(dev_vae, non_blocking=True).clone()
             B = lat_vae_full.size(0)
             chunk = 2 if B >= 2 else 1
@@ -507,78 +530,74 @@ def main():
                     else:
                         v_est = total_diff / max(dt_unit, 1e-8)
 
-                # 基流位移（体积项和噪声都要用）
-                base_disp = (v_est * dt_unit) if v_est is not None else z
-                base_norm = _bn(base_disp)
-
-                # ===== Volume guidance：只在 do_volume 的 step 上做 VAE decode + CLIP + 反向 =====
-                g_proj = None
-                if do_volume:
-                    def _decode_for_volume(z_var: torch.Tensor) -> torch.Tensor:
-                        return _vae_decode_pixels(z_var)
-
-                    with torch.enable_grad(), torch.backends.cudnn.flags(
-                        enabled=False, benchmark=False, deterministic=False
-                    ):
-                        imgs_chunk = checkpoint(_decode_for_volume, z, use_reentrant=False)
-
-                    imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
-                    _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
-                    current_logdet = float(_logs.get("logdet", 0.0))
-
-                    # 能量单调守门
-                    last_logdet = state.get("last_logdet", None)
-                    if (last_logdet is not None) and (current_logdet < last_logdet):
-                        gamma_sched_local = 0.5 * gamma_sched
+                # Heun 风格 endpoint 预测 latent
+                def _decode_with_endpoint(z_var: torch.Tensor) -> torch.Tensor:
+                    if v_est is not None:
+                        z_pred = z_var + dt_unit * v_est
                     else:
-                        gamma_sched_local = gamma_sched
-                    state["last_logdet"] = current_logdet
+                        z_pred = z_var
+                    return _vae_decode_pixels(z_pred)
 
-                    grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
+                with torch.enable_grad(), torch.backends.cudnn.flags(
+                    enabled=False, benchmark=False, deterministic=False
+                ):
+                    imgs_chunk = checkpoint(_decode_with_endpoint, z, use_reentrant=False)
 
-                    # VJP 回 latent
-                    grad_lat = torch.autograd.grad(
-                        outputs=imgs_chunk, inputs=z, grad_outputs=grad_img_vae,
-                        retain_graph=False, create_graph=False, allow_unused=False
-                    )[0]
+                # CLIP 体积损失 + 像素梯度
+                imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
+                _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
+                current_logdet = float(_logs.get("logdet", 0.0))
 
-                    # 体积力：对基流（部分/全）正交
-                    g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
-                    div_disp = g_proj * dt_unit  # 确定性体积位移
+                # 能量单调守门
+                last_logdet = state.get("last_logdet", None)
+                if (last_logdet is not None) and (current_logdet < last_logdet):
+                    gamma_sched = 0.5 * gamma_sched
+                state["last_logdet"] = current_logdet
 
-                    # 清理 volume 中间变量
-                    del imgs_clip, grad_img_clip, grad_img_vae, grad_lat, imgs_chunk
-                else:
-                    # 跳过 volume：不做 decode/CLIP/反向，体积位移为 0
-                    gamma_sched_local = 0.0
-                    div_disp = torch.zeros_like(base_disp)
+                grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
 
-                # ===== 噪声项（A + B）=====
+                # VJP 回 latent
+                grad_lat = torch.autograd.grad(
+                    outputs=imgs_chunk, inputs=z, grad_outputs=grad_img_vae,
+                    retain_graph=False, create_graph=False, allow_unused=False
+                )[0]
+
+                # 体积力：对基流（部分/全）正交
+                g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
+                div_disp = g_proj * dt_unit  # 确定性体积位移
+
+                # ===== 噪声项（A + B，带时间权重）=====
                 brown_std = _brownian_std_from_scheduler(ppl, i)
                 eta = float(args.eta_sde)
-                base_brown = eta * brown_std
+                base_brown = eta * brown_std * noise_w
 
                 if args.noise_timing == 'early':
                     rho_t = args.rho0 * t_norm + args.rho1 * (1.0 - t_norm)
                 else:
                     rho_t = args.rho1 * t_norm + args.rho0 * (1.0 - t_norm)
 
+                base_disp = (v_est * dt_unit) if v_est is not None else z
+                base_norm = _bn(base_disp)
+
                 target_brown = torch.full_like(base_norm, fill_value=max(base_brown, 0.0))
-                target_snr   = torch.clamp(base_norm * max(rho_t, 0.0), min=0.0)
-                target = torch.minimum(target_brown, target_snr)
+                target_snr   = torch.clamp(base_norm * max(rho_t, 0.0) * noise_w, min=0.0)
 
-                # 噪声 shape：有 g_proj 就用 g_proj，没有就用 base_disp
-                shape_for_noise = g_proj if g_proj is not None else base_disp
-                xi = torch.randn_like(shape_for_noise)
+                # 这里我们只用 Brownian 尺度来控制噪声幅度（和你现在的实现一致）
+                target = target_brown
 
-                vnorm = _bn(v_est) if v_est is not None else None
-                if (v_est is None) or (vnorm is None) or (float(vnorm.mean().item()) < float(args.vnorm_threshold)):
-                    xi_eff = xi
+                if noise_w <= 1e-8 or float(target.mean().item()) == 0.0:
+                    noise_disp = torch.zeros_like(div_disp)
                 else:
-                    xi_eff = project_partial_orth(xi, v_est, float(args.noise_partial_ortho))
+                    xi = torch.randn_like(g_proj)
 
-                xi_norm = _bn(xi_eff)
-                noise_disp = xi_eff / (xi_norm.view(-1,1,1,1) + 1e-12) * target.view(-1,1,1,1)
+                    vnorm = _bn(v_est) if v_est is not None else None
+                    if (v_est is None) or (vnorm is None) or (float(vnorm.mean().item()) < float(args.vnorm_threshold)):
+                        xi_eff = xi
+                    else:
+                        xi_eff = project_partial_orth(xi, v_est, float(args.noise_partial_ortho))
+
+                    xi_norm = _bn(xi_eff)
+                    noise_disp = xi_eff / (xi_norm.view(-1,1,1,1) + 1e-12) * target.view(-1,1,1,1)
                 # ===== 噪声项结束 =====
 
                 # 信赖域：只限制体积位移
@@ -586,13 +605,13 @@ def main():
                 div_raw   = _bn(div_disp)
                 scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (div_raw + 1e-12))
 
-                # 最终位移：γ 只作用体积项；noise 不受 γ 控制
-                delta_chunk = (gamma_sched_local * scale.view(-1,1,1,1)) * div_disp + noise_disp
+                # 最终位移：γ 只作用体积项，噪声不乘 γ
+                delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * div_disp + noise_disp
 
                 delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
                 lat_new[s:e] = lat_new[s:e] + delta_tr
 
-                # 缓存控制位移（包括 volume + noise 的总位移）
+                # 缓存控制位移
                 if "ctrl_cache" not in state:
                     state["ctrl_cache"] = []
                 state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
@@ -602,16 +621,15 @@ def main():
                         n_div   = _bn(div_disp).mean().item()
                         n_noise = _bn(noise_disp).mean().item()
                         n_base  = _bn(base_disp).mean().item()
-                        print(f"[t={t_norm:.2f}] |base|={n_base:.4f} |div|={n_div:.4f} |noise|={n_noise:.4f} "
-                              f"gamma={gamma_sched_local:.4f} brown={brown_std:.4f} rho_t={rho_t:.3f}")
+                        print(
+                            f"[t={t_norm:.2f}] |base|={n_base:.4f} |div|={n_div:.4f} "
+                            f"|noise|={n_noise:.4f} gamma={gamma_sched:.4f} "
+                            f"brown={brown_std:.4f} rho_t={rho_t:.3f} w={noise_w:.3f}"
+                        )
 
                 if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
                 if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
-
-                # 释放部分中间变量（可选）
-                del noise_disp, delta_chunk, delta_tr, xi, xi_eff, xi_norm, target, target_brown, target_snr
-                del base_disp, base_norm, disp_cap, div_raw, scale
-                del z, v_est
+                del imgs_chunk, imgs_clip, grad_img_clip, grad_img_vae, grad_lat, g_proj, div_disp, noise_disp, delta_chunk, delta_tr, z, v_est
 
             kw["latents"] = lat_new
 
@@ -625,44 +643,24 @@ def main():
             state["prev_dt_unit"] = dt_unit
             return kw
 
-        # ===== 3) 解析 spec / 构造 concept -> prompts 映射 =====
-        concept_to_prompts: "OrderedDict[str, List[str]]" = OrderedDict()
+        # ===== 3) 解析 spec / 构造任务列表 =====
+        jobs: List[tuple[str, str]] = []
         if args.spec is not None:
             with open(args.spec, 'r', encoding='utf-8') as f:
                 spec = json.load(f, object_pairs_hook=OrderedDict)
-            if not isinstance(spec, dict):
-                raise ValueError("Spec must be a JSON object {concept:[prompts...]}")
-            for concept, prompts in spec.items():
-                if isinstance(prompts, str):
-                    prompts = [prompts]
-                if not isinstance(prompts, (list, tuple)):
-                    continue
-                cleaned = []
-                seen = set()
-                for p in prompts:
-                    if not isinstance(p, str):
-                        continue
-                    s = p.strip()
-                    if s and s not in seen:
-                        seen.add(s)
-                        cleaned.append(s)
-                if cleaned:
-                    concept_to_prompts[str(concept)] = cleaned
+            concept_to_prompts = _parse_concepts_spec(spec)
+            for concept, plist in concept_to_prompts.items():
+                for p in plist:
+                    jobs.append((concept, p))
         else:
-            concept_to_prompts["default"] = [args.prompt]
+            jobs.append(("default", args.prompt))
 
         # ===== 4) 循环 concept × prompt × guidance × seed =====
         outputs_root = os.path.join(project_root, 'outputs')
 
-        def _sync_all_cuda():
-            if torch.cuda.is_available():
-                try:
-                    torch.cuda.synchronize()
-                except Exception:
-                    pass
-
-        for concept, prompts in concept_to_prompts.items():
+        for concept, prompt in jobs:
             concept_slug = _slugify(concept) or "no_concept"
+            prompt_slug  = _slugify(prompt)  or "no_prompt"
 
             auto_dirname = f"{args.method}_{concept_slug}"
             base_out_dir = (
@@ -675,184 +673,55 @@ def main():
             os.makedirs(imgs_root, exist_ok=True)
             os.makedirs(eval_dir, exist_ok=True)
 
-            # cost CSV（每个 concept 一个）
-            cost_csv_path = os.path.join(eval_dir, f"{args.method}_{concept_slug}_cost.csv")
-            csv_new = not os.path.exists(cost_csv_path)
-            cost_f = open(cost_csv_path, "a", encoding="utf-8", newline="")
-            cost_writer = csv.writer(cost_f)
-            if csv_new:
-                cost_writer.writerow([
-                    "method",
-                    "concept",
-                    "prompt",
-                    "seed",
-                    "guidance",
-                    "steps",
-                    "num_images",
-                    "height",
-                    "width",
-                    "dtype",
-                    "device_transformer",
-                    "device_vae",
-                    "device_clip",
-                    "wall_time_total",
-                    "wall_time_per_image",
-                    "flops_total",
-                    "flops_per_image",
-                    "gpu_mem_peak_mb",
-                ])
+            for guidance in guidance_list:
+                for seed in seed_list:
+                    _reset_state()
+                    run_folder_name = f"{prompt_slug}_seed{seed}_g{guidance}_s{args.steps}"
+                    run_img_dir = os.path.join(imgs_root, run_folder_name)
+                    os.makedirs(run_img_dir, exist_ok=True)
 
-            for prompt in prompts:
-                prompt_slug  = _slugify(prompt)  or "no_prompt"
+                    _log(f"Output dir: {run_img_dir}", True)
+                    _log(f"Concept={concept}, Prompt=\"{prompt}\", seed={seed}, guidance={guidance}", True)
 
-                for guidance in guidance_list:
-                    for seed in seed_list:
-                        _reset_state()
-                        run_folder_name = f"{prompt_slug}_seed{seed}_g{guidance}_s{args.steps}"
-                        run_img_dir = os.path.join(imgs_root, run_folder_name)
-                        os.makedirs(run_img_dir, exist_ok=True)
+                    # 生成 latent
+                    generator = torch.Generator(device=dev_tr) if dev_tr.type=='cuda' else torch.Generator()
+                    generator.manual_seed(seed)
 
-                        _log(f"Output dir: {run_img_dir}", True)
-                        _log(f"Concept={concept}, Prompt=\"{prompt}\", seed={seed}, guidance={guidance}", True)
+                    _log("Start pipeline() ...", args.debug)
+                    latents_out = pipe(
+                        prompt=prompt,
+                        negative_prompt=(args.negative if args.negative else None),
+                        height=args.height, width=args.width,
+                        num_images_per_prompt=args.G,
+                        num_inference_steps=args.steps,
+                        guidance_scale=guidance,
+                        generator=generator,
+                        callback_on_step_end=diversity_callback,
+                        callback_on_step_end_tensor_inputs=["latents"],
+                        output_type="latent",
+                        return_dict=False,
+                    )[0]
 
-                        # 生成器
-                        generator = torch.Generator(device=dev_tr) if dev_tr.type=='cuda' else torch.Generator()
-                        generator.manual_seed(seed)
+                    # 最终 decode
+                    sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
+                    latents_final = latents_out.to(dev_vae, non_blocking=True)
 
-                        flops_total = -1.0
-                        gpu_mem_peak_mb = -1.0
+                    if args.enable_vae_tiling and hasattr(pipe, "vae"):
+                        if hasattr(pipe.vae, "enable_slicing"): pipe.vae.enable_slicing()
+                        if hasattr(pipe.vae, "enable_tiling"):  pipe.vae.enable_tiling()
 
-                        # reset 各卡 peak stats
-                        if mem_devices and torch.cuda.is_available():
-                            for d in mem_devices:
-                                try:
-                                    torch.cuda.reset_peak_memory_stats(d)
-                                except Exception as e:
-                                    _log(f"[DIV][WARN] could not reset peak memory stats on {d}: {e}", True)
+                    with torch.inference_mode(), torch.backends.cudnn.flags(
+                        enabled=False, benchmark=False, deterministic=False
+                    ):
+                        images = checkpoint(
+                            lambda z: (pipe.vae.decode(z / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0,
+                            latents_final, use_reentrant=False
+                        )
 
-                        def _run_pipeline_and_decode():
-                            latents_out = pipe(
-                                prompt=prompt,
-                                negative_prompt=(args.negative if args.negative else None),
-                                height=args.height, width=args.width,
-                                num_images_per_prompt=args.G,
-                                num_inference_steps=args.steps,
-                                guidance_scale=guidance,
-                                generator=generator,
-                                callback_on_step_end=diversity_callback,
-                                callback_on_step_end_tensor_inputs=["latents"],
-                                output_type="latent",
-                                return_dict=False,
-                            )[0]
+                    for i in range(images.size(0)):
+                        save_image(images[i].cpu(), os.path.join(run_img_dir, f"img_{i:03d}.png"))
 
-                            sf = getattr(pipe.vae.config, "scaling_factor", 1.0)
-                            latents_final = latents_out.to(dev_vae, non_blocking=True)
-
-                            if args.enable_vae_tiling and hasattr(pipe, "vae"):
-                                if hasattr(pipe.vae, "enable_slicing"): pipe.vae.enable_slicing()
-                                if hasattr(pipe.vae, "enable_tiling"):  pipe.vae.enable_tiling()
-
-                            with torch.inference_mode(), torch.backends.cudnn.flags(
-                                enabled=False, benchmark=False, deterministic=False
-                            ):
-                                images = checkpoint(
-                                    lambda z: (pipe.vae.decode(z / sf, return_dict=False)[0].float().clamp(-1,1) + 1.0) / 2.0,
-                                    latents_final, use_reentrant=False
-                                )
-                            return latents_out, latents_final, images
-
-                        _log("Start pipeline() ...", args.debug)
-
-                        # 计时窗口只覆盖 pipeline + decode (+ profiler)，不覆盖保存 PNG / 写 CSV
-                        _sync_all_cuda()
-                        t0_run = time.perf_counter()
-
-                        if args.profile_flops and torch_profiler is not None:
-                            activities = [torch_profiler.ProfilerActivity.CPU]
-                            if torch.cuda.is_available():
-                                activities.append(torch_profiler.ProfilerActivity.CUDA)
-                            try:
-                                with torch_profiler.profile(
-                                    activities=activities,
-                                    record_shapes=False,
-                                    profile_memory=False,
-                                    with_flops=True,
-                                ) as prof:
-                                    latents_out, latents_final, images = _run_pipeline_and_decode()
-                                try:
-                                    flops_total = float(sum(
-                                        e.flops for e in prof.key_averages()
-                                        if hasattr(e, "flops") and e.flops is not None
-                                    ))
-                                except Exception as e:
-                                    _log(f"[DIV][WARN] failed to aggregate FLOPs: {e}", True)
-                                    flops_total = -1.0
-                            except Exception as e:
-                                _log(f"[DIV][WARN] FLOPs profiling failed, fallback without FLOPs. Error: {e}", True)
-                                latents_out, latents_final, images = _run_pipeline_and_decode()
-                                flops_total = -1.0
-                        else:
-                            if args.profile_flops and torch_profiler is None:
-                                _log("[DIV][WARN] torch.profiler not available; FLOPs will be -1.", True)
-                            latents_out, latents_final, images = _run_pipeline_and_decode()
-
-                        _sync_all_cuda()
-                        t1_run = time.perf_counter()
-                        wall_time_total = float(t1_run - t0_run)
-
-                        num_images = int(images.size(0)) if images is not None else 0
-                        wall_time_per_image = wall_time_total / num_images if num_images > 0 else -1.0
-                        flops_per_image = flops_total / num_images if (num_images > 0 and flops_total > 0) else -1.0
-
-                        # 读取多卡峰值显存
-                        if mem_devices and torch.cuda.is_available():
-                            peaks_mb = []
-                            for d in mem_devices:
-                                try:
-                                    peak_bytes = torch.cuda.max_memory_allocated(d)
-                                    peaks_mb.append(float(peak_bytes) / (1024.0 ** 2))
-                                except Exception as e:
-                                    _log(f"[DIV][WARN] failed to get peak memory on {d}: {e}", True)
-                            gpu_mem_peak_mb = max(peaks_mb) if peaks_mb else -1.0
-                        else:
-                            gpu_mem_peak_mb = -1.0
-
-                        # 保存图片（不计入 wall_time_total）
-                        for i in range(images.size(0)):
-                            save_image(images[i].cpu(), os.path.join(run_img_dir, f"img_{i:03d}.png"))
-
-                        _log(f"Done one job. Saved {num_images} images -> {run_img_dir} | "
-                             f"time={wall_time_total:.2f}s | peak_mem={gpu_mem_peak_mb:.1f}MB", True)
-
-                        # 写 cost 行
-                        cost_writer.writerow([
-                            args.method,
-                            concept,
-                            prompt,
-                            int(seed),
-                            float(guidance),
-                            int(args.steps),
-                            num_images,
-                            int(args.height),
-                            int(args.width),
-                            dtype_str,
-                            args.device_transformer or "",
-                            args.device_vae or "",
-                            args.device_clip or "",
-                            f"{wall_time_total:.6f}",
-                            f"{wall_time_per_image:.6f}",
-                            f"{flops_total:.3f}",
-                            f"{flops_per_image:.3f}",
-                            f"{gpu_mem_peak_mb:.3f}",
-                        ])
-                        cost_f.flush()
-
-                        # 适度清理
-                        del latents_out, latents_final, images
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-
-            cost_f.close()
+                    _log(f"Done one job. Saved to {run_img_dir}", True)
 
         _log("All jobs finished.", True)
 

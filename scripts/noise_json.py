@@ -825,8 +825,9 @@ def parse_args():
     ap.add_argument('--method', type=str, default='noise')
 
     # 多样性目标（方法相关）
-    ap.add_argument('--gamma0', type=float, default=0.06)
-    ap.add_argument('--gamma-max-ratio', type=float, default=0.20)
+    ap.add_argument('--gamma0', type=float, default=0.12)
+    ap.add_argument('--gamma-max-ratio', type=float, default=0.30)
+
 
     # 正交/门控（只影响确定性体积项）
     ap.add_argument('--partial-ortho', type=float, default=0.95)
@@ -842,16 +843,16 @@ def parse_args():
     ap.add_argument(
         '--noise-gate',
         type=str,
-        default='0.40,1.00',   # 只在早期 ~ 前 60% 的步数上加噪声
+        default='0.50,1.00',   # 只在早期 ~ 前 60% 的步数上加噪声
         help='噪声时间窗 [low, high] in t_norm (0~1)，区间外噪声为 0，区间内从 early→late 线性衰减'
     )
 
     # 噪声控制（A+B）
-    ap.add_argument('--eta-sde', type=float, default=10.0,
+    ap.add_argument('--eta-sde', type=float, default=5.0,
                     help='SDE/Brownian 噪声强度 (与 scheduler 对齐)')
-    ap.add_argument('--rho0', type=float, default=2.5,
+    ap.add_argument('--rho0', type=float, default=4.0,
                     help='相对 SNR 目标（早期）')
-    ap.add_argument('--rho1', type=float, default=0.5,
+    ap.add_argument('--rho1', type=float, default=2.0,
                     help='相对 SNR 目标（末期）')
     ap.add_argument('--noise-partial-ortho', type=float, default=1.0,
                     help='噪声相对基流的正交比例')

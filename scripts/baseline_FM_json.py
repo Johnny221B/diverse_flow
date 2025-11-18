@@ -143,7 +143,7 @@ def parse_args():
 
     # 多 guidance/seed（既支持 nargs 也支持逗号分隔）
     ap.add_argument('--guidances', nargs='*', default=[3.0, 5.0, 7.5], help='e.g. 3.0 5.0 7.5 OR "3.0,5.0,7.5"')
-    ap.add_argument('--seeds', nargs='*', default=[4444, 5555, 6666], help='e.g. 1111 2222 3333 4444 OR "1111,2222,..."')
+    ap.add_argument('--seeds', nargs='*', default=[1111, 2222, 3333, 4444, 5555, 6666], help='e.g. 1111 2222 3333 4444 OR "1111,2222,..."')
 
     # 模型路径
     ap.add_argument('--model-dir', type=str,

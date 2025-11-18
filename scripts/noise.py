@@ -121,12 +121,12 @@ def parse_args():
     # 生成参数
     ap.add_argument('--prompt', type=str, required=True)
     ap.add_argument('--negative', type=str, default='')
-    ap.add_argument('--G', type=int, default=64)  # 默认 64
+    ap.add_argument('--G', type=int, default=32)  # 默认 64
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)
     ap.add_argument('--guidance', type=float, default=3.0)
-    ap.add_argument('--seed', type=int, default=0)
+    ap.add_argument('--seed', type=int, default=42)
 
     # 本地模型路径
     ap.add_argument('--model-dir', type=str,

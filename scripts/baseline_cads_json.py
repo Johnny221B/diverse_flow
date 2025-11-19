@@ -251,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--steps", type=int, default=30)
     p.add_argument("--guidances", type=float, nargs="+", default=None, help="e.g., 3.0 7.5 12.0")
     p.add_argument("--guidance", type=float, default=3.0, help="used if --guidances omitted")
-    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333])
+    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 3333, 5555])
 
     # Resolution
     p.add_argument("--height", type=int, default=512)

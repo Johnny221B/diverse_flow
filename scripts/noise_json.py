@@ -806,9 +806,9 @@ def parse_args():
     ap.add_argument('--guidance', type=float, default=5.0)
 
     # 多个 seed / guidance
-    ap.add_argument('--seeds', type=str, default="1111,3333,4444,5555,6666,7777",
+    ap.add_argument('--seeds', type=str, default="1111,3333,5555",
                     help='多 seed，逗号分隔，如 "1111,2222,3333"')
-    ap.add_argument('--guidances', type=str, default=None,
+    ap.add_argument('--guidances', type=str, default="3.0,5.0,7.5",
                     help='多 guidance，逗号分隔，如 "3.0,5.0"')
 
     # JSON spec：{ "bowl": ["a photo of a bowl", ...], ... }

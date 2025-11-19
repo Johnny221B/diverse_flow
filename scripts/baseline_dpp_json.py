@@ -128,7 +128,7 @@ def parse_args():
     p.add_argument("--guidances", type=float, nargs="+", default=None,
                    help="multi guidance (grid mode)")
     p.add_argument("--guidance", type=float, default=3.0, help="single choice; 也用于 ImageNet 模式")
-    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444, 5555, 6666],
+    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 3333, 5555],
                    help="grid 模式的 seeds 列表；ImageNet 模式若未显式指定 --seed，则用 seeds[0] 作为 base_seed")
     p.add_argument("--seed", type=int, default=42,
                    help="ImageNet-400 模式 base_seed（若不指定则用 seeds[0]）")

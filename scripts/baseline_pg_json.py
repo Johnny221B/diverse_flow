@@ -126,7 +126,7 @@ def build_args() -> argparse.Namespace:
                    help="List of cfg scales; e.g., 3.0 7.5 12.0")
     p.add_argument("--cfg", type=float, default=5.0,
                    help="Single cfg if --guidances is omitted")
-    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 2222, 3333, 4444, 5555, 6666])
+    p.add_argument("--seeds", type=int, nargs="+", default=[1111, 3333, 5555])
 
     # Resolution
     p.add_argument("--height", type=int, default=512)

@@ -32,8 +32,7 @@ In the revised manuscript, Fig. 6 now includes samples from the **full OSCAR** m
 
 Regarding Fig. 15, the confusion partly comes from an earlier **convention switch** between DDPM-style and flow-matching time parameterization: DDPM and flow matching define \(x_0\) / \(x_T\) in opposite ways. We initially followed the DDPM convention (\(x_0\) = clean image) but finalized on the flow-matching convention (\(x_0\) = noise). The current Fig. 15 caption still reflects the earlier wording. We have corrected this caption and the related notation in the revised version.
 
-**Best regards,**
-**Authors**
+**Best regards,** **Authors**
 
 ## Reviewer 2
 
@@ -320,7 +319,7 @@ In other words, **OSCAR is complementary to high-order samplers**: the former ch
 | CADS          | 27.32 ± 0.21       | 2.54 ± 0.28       | 5.58 ± 0.19         | 169.1 ± 2.5        | 24.0 ± 1.9         |
 | PG            | 28.27 ± 0.27       | 2.54 ± 0.13       | 5.43 ± 0.18         | 163.7 ± 1.3        | 24.2 ± 3.3         |
 | **w/o OP & RR** | 26.70 ± 0.23     | 2.82 ± 0.20       | 4.86 ± 0.24         | 185.9 ± 1.8        | 50.1 ± 2.8         |
-| **w/o RR**    | 27.26 ± 0.39       | 2.77 ± 0.16       | 5.23 ± 0.28         | 177.4 ± 3.0        | 35.0 ± 1.5         |
+| **w/o RR**    | 27.26 ± 0.39       | 2.77 ± 0.16       | 5.23 ± 0.28         | 174.4 ± 3.0        | 35.0 ± 1.5         |
 | **w/o OP**    | 26.59 ± 0.25       | 2.75 ± 0.19       | 5.06 ± 0.16         | 177.8 ± 3.2        | 38.8 ± 1.5         |
 | **OSCAR (full)** | **28.26 ± 0.22** | **2.86 ± 0.05** | **5.63 ± 0.22**     | **163.3 ± 1.6**    | **21.2 ± 1.5**     |
 

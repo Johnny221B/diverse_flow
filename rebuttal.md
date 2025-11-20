@@ -23,16 +23,22 @@
 
 > Weakness 2 – Qualitative comparisons in Fig. 6
 
-In the revised manuscript, Fig. 6 now includes samples from the **full OSCAR** model alongside the ablated variants, so that the impact of each component can be directly inspected. Due to space constraints, we place additional qualitative comparisons (across more prompts and settings) in **Appendix G**, and explicitly refer to this section from the main text.
+Regarding the visual comparison for the ablation study, we fully agree that showing the full OSCAR model alongside the ablated variants is essential for directly inspecting the impact of each component. However, due to layout constraints in the main text, we were unable to expand Figure 6 to include these additional columns without compromising legibility. Therefore, we have included this comprehensive side-by-side comparison in Appendix G of the revised manuscript. We have also updated the caption of Figure 6 in the main text to explicitly direct readers to these additional qualitative results.
 
 > Weakness 3 & Question 1 – Definition and role of \(t_{\text{gate}}\)
 
-- In our final convention, **\(t_{\text{gate}}\)** is a **scalar end-time of noise injection**: the stochastic term is active on the interval \([t_{\text{start}}, t_{\text{gate}}]\). In all robustness ablations in the main paper, we fix \(t_{\text{start}} = 0.05\) and sweep \(t_{\text{gate}}\); this is what Fig. 7(c) and Table 7 are visualizing.
+- In our final convention, **\(t_{\text{gate}}\)** is a **scalar end-time of noise injection**: the stochastic term is active on the interval \([t_{\text{start}}, t_{\text{gate}}]\). In all robustness ablations in the main paper, we fix \(t_{\text{start}} = 0.05\) and sweep \(t_{\text{gate}}\); this is what Fig. 7(c) and Table 17 are visualizing.
 - The **interval notation** \([t_{\text{start}}, t_{\text{end}}]\) that appears in parts of the appendix is a leftover from an earlier draft where we denoted the gate by its start and end times. In the final implementation and experiments, we use \(t_{\text{end}} \equiv t_{\text{gate}}\). We will unify the notation across the main text, figures, and appendix to always use \([t_{\text{start}}, t_{\text{gate}}]\).
+- Fundamentally, $t_{\text{gate}}$ serves as a practical **engineering heuristic** to ensure the final image quality. In SDE-based sampling, injecting noise up to the very last step ($t=1$) prevents the solver from settling onto the clean data manifold, leaving residual noise. Therefore, $t_{\text{gate}}$ is simply a switch to turn off stochasticity near the end to guarantee convergence, it is not a theoretical hyperparameter coupled with our core orthogonal control algorithm.
+- We respectfully clarify that the degradation observed in Section 5.2 does **not** imply parameter sensitivity, but rather demonstrates the **necessity of the gate mechanism**.
+
+- * **Section 5.2 :** This ablation compared a standard gate against the **extreme case** of full-trajectory noise ($t_{\text{gate}} = 1.0$). The substantial performance degradation here simply confirms that *some* gate is required to ensure convergence.
+- * **Appendix F :** To demonstrate robustness, we swept $t_{\text{gate}}$ across a wide reasonable range in **Appendix F 4.1 (Table 17)**. The results show that within this broad operational range, performance is highly stable and does not degrade, proving that the method is **not sensitive** to the precise value of $t_{\text{gate}}$.
 
 Regarding Fig. 15, the confusion partly comes from an earlier **convention switch** between DDPM-style and flow-matching time parameterization: DDPM and flow matching define \(x_0\) / \(x_T\) in opposite ways. We initially followed the DDPM convention (\(x_0\) = clean image) but finalized on the flow-matching convention (\(x_0\) = noise). The current Fig. 15 caption still reflects the earlier wording. We have corrected this caption and the related notation in the revised version.
 
-**Best regards,** **Authors**
+**Best regards,** 
+**Authors**
 
 ## Reviewer 2
 
@@ -64,8 +70,8 @@ To avoid confusion, in the revised manuscript we will:
    - there is **no additional pretrained feature predictor** beyond the base FM model;
    - Heun adds only **one extra backbone evaluation per step**, which is already accounted for in the reported NFE.
 
-   To assess the importance of this predictor and the specific solver choice, we additionally ran a robustness/ablation study in which we:
-   - remove the predictor entirely (“w/o Predictor”, i.e., directly using the current feature vector without correction),
+   To assess the importance of this predictor and the specific solver choice, we additionally ran a robustness study in which we:
+   - remove the predictor entirely (directly using the current feature vector without correction),
    - replace Heun by Euler or Midpoint predictors.
 
    The results (6 seeds, mean ± 95% CI) are:
@@ -120,8 +126,22 @@ where \([\cdot]_i\) denotes the component for the \(i\)-th sample.
 In practice, we compute this pullback efficiently using **two reverse-mode vector–Jacobian products (VJPs)**—first through \(\phi\), then through \(\hat\psi\)—without ever forming the Jacobian matrices explicitly. In the revised version, we will (i) add this chain-rule explanation and the sign convention immediately after Eq. (4), and (ii) explicitly point to Appendix B, Lemma 1, which provides the formal derivation showing that Eq. (4) is exactly the pullback of the feature-space gradient to the sampler’s state space.
 
 
-> weakness 5
+> weakness 5 regarding the term "Stochastic Control"
 
+We thank the reviewer for this insightful comment. We acknowledge that **"Stochastic Control"** is a specific mathematical field often associated with minimizing expected cost functionals via tools like the HJB equation.
+
+Our original choice of the term **"Stochastic Control"** was intended to structurally describe the two core components of our proposed SDE in Eq. 1:
+
+1.  **"Stochastic":** Refers to the injection of the noise term ($\sqrt{\beta(t)}dW_{t}$), which reintroduces randomness into the sampling process to enable exploration.
+2.  **"Control":** Refers to the deterministic guidance signal ($g(x,t)$). We specifically designed this term based on maximizing the **feature-space volume**. This term acts as an active force that **controls** and steers the particle trajectories outward to cover diverse modes, preventing them from collapsing into a single high-density region.
+
+In the broader context of generative modeling and dynamical systems, applying an external force to influence system behavior is widely referred to as "control." Therefore, we believe the name effectively communicates the method's function: using stochasticity and deterministic guidance to control the flow.
+
+However, we agree that avoiding terminological collision with the established field of Optimal Stochastic Control is desirable. To resolve this ambiguity while preserving the acronym **OSCAR**, we propose revising the full name in the final manuscript to:
+
+**"Orthogonal Stochastic Correction for Alignment-Respecting Diversity..."**
+
+The term **"Correction"** accurately captures our method's nature: we apply a deterministic correction and a stochastic correction to the base flow to achieve diversity. We believe this modification maintains the accuracy of our description while satisfying the reviewer's concern.
 
 > Weakness 6 – Readability of Appendix B
 
@@ -172,49 +192,21 @@ In short, OSCAR actively forces a **set** of samples to diverge to cover the sem
    | PG             | 4093.4      | 229.6                 | 26.4             |
    | **OSCAR (ours)** | **5534.6**  | **451.4**             | **18.2**         |
 
-   Under the same NFE, CFG, and particle count, OSCAR introduces only a **moderate computational overhead** relative to the FM-SD3.5 baseline (about 1.35× FLOPs and ~1.9× wall-clock time per run), while its peak VRAM is actually slightly **lower** than the baseline due to our memory-sharing implementation of the VJP. Crucially, this overhead is **much smaller than DPP**, which requires more than **2×** the FLOPs and over **4×** the runtime of the baseline under the same settings. These results empirically support our claim that OSCAR achieves strong diversity gains with substantially lower computational complexity than prior set-level diversity methods such as DPP, while maintaining memory usage comparable to standard FM sampling.
+   Under the same NFE, CFG, and particle count, OSCAR introduces only a **moderate computational overhead** relative to the FM-SD3.5 baseline, while its peak VRAM is actually slightly **lower** than the baseline due to our memory-sharing implementation of the VJP. Crucially, this overhead is **much smaller than DPP**, which requires more than **2×** the FLOPs and over **4×** the runtime of the baseline under the same settings. These results empirically support our claim that OSCAR achieves strong diversity gains with substantially lower computational complexity than prior set-level diversity methods such as DPP, while maintaining memory usage comparable to standard FM sampling.
 
 > Question 2 – Statistical significance of Table 1
 
-The relatively large standard deviations in Table 1 mainly come from **variation across prompts within the same concept**, rather than instability of our method.
+We agree that some differences in Table 1 look small compared to the reported standard deviations. This is mainly because each concept is averaged over multiple prompts (e.g., “a truck”, “a photo of a truck”), and different prompts within the same concept can induce very different metric values. As a result, the standard deviation in Table 1 is dominated by across-prompt variability, rather than by seed noise for a fixed prompt.
 
-In our setup, each *concept* (e.g., “truck”) is represented by several prompts (e.g., “a truck”, “a photo of one truck”, …). We first evaluate each method on all prompts and seeds, and then aggregate over prompts to obtain the mean ± std reported in Table 1. Empirically, different prompts for the same concept can differ substantially in difficulty and in the resulting metric values (e.g., “a truck” vs. “a photo of a truck” can yield almost a two-fold difference in some metrics), which inflates the overall standard deviation.
+Therefore, we clarify this by reporting per-prompt results for two representative prompts under the “truck’’ concept in Appendix B. These tables show that, for each fixed prompt and CFG level, OSCAR consistently improves the diversity metrics (Vendi Pixel / Vendi Inception / 1−MS-SSIM) over the baselines, while quality metrics (FID, CLIP Score, Brisque) stay comparable and do not show systematic degradation. In addition, we run the same prompt-level evaluation on three other concepts using the same set of prompts and observe the same pattern: consistent gains in diversity metrics without noticeable quality loss. Our claim is therefore that diversity gains are consistent across prompts and concepts, and that the quality metrics are used as a sanity check (no significant quality loss), rather than as the main target of statistically significant improvement.
 
-To make the comparison more transparent, in the revised version we:
-
-1. **Report per-prompt metrics.**  
-   In a new appendix table (Table A.x), we list metrics separately for each prompt. This table shows that, for almost every prompt, OSCAR improves Vendi and PRD-AUC over the FM-SD3.5 baseline, while FID/CLIP remain comparable or slightly better. This clarifies that the gains are consistent across prompts rather than driven by a few outliers.
-
-2. **Use prompt-level paired comparisons.**  
-   We treat each prompt as a paired data point (averaging over seeds per prompt) and compare OSCAR against the FM-SD3.5 baseline. Across prompts, OSCAR consistently improves the **diversity metrics** (Vendi, PRD-AUC), while differences in **quality metrics** (FID, CLIP, ImageReward) are small and not systematically negative. We will add a short prompt-level summary and significance analysis (paired comparisons) in Appendix F to support this claim.
-
-Overall, while the aggregated mean ± std in Table 1 can appear conservative due to prompt variability, the per-prompt analysis shows that OSCAR’s diversity improvements are **systematic across prompts**, and that single-image quality is **not degraded**.
-
-| Method | Brisque @ 3.0 | Brisque @ 5.0 | Brisque @ 7.5 | 1−MS-SSIM(%) @ 3.0 | 1−MS-SSIM(%) @ 5.0 | 1−MS-SSIM(%) @ 7.5 |
-| --- | --- | --- | --- | --- | --- | --- |
-| PG   | 43.88 ± 3.47 | 36.40 ± 3.20 | 40.30 ± 2.48 | 86.44 ± 2.63 | 86.08 ± 1.96 | 83.81 ± 1.97 |
-| CADS | 22.52 ± 1.61 | 23.59 ± 1.61 | 28.37 ± 1.48 | 86.29 ± 2.15 | 85.71 ± 2.26 | 84.46 ± 2.65 |
-| DPP  | 22.18 ± 1.57 | 25.77 ± 1.33 | 32.05 ± 0.92 | 88.33 ± 0.91 | 87.47 ± 1.86 | 85.58 ± 1.32 |
-| **Ours** | **19.50 ± 2.04** | **22.31 ± 1.62** | **27.65 ± 1.72** | **90.20 ± 1.94** | **88.60 ± 1.24** | **87.73 ± 1.38** |
-| Method | Vendi Pixel @ 3.0 | Vendi Pixel @ 5.0 | Vendi Pixel @ 7.5 | Vendi Inception @ 3.0 | Vendi Inception @ 5.0 | Vendi Inception @ 7.5 |
-| --- | --- | --- | --- | --- | --- | --- |
-| PG   | 4.63 ± 0.27 | 4.21 ± 0.13 | 4.09 ± 0.07 | 2.49 ± 0.17 | 2.42 ± 0.14 | 2.38 ± 0.11 |
-| CADS | 4.63 ± 0.41 | 3.95 ± 0.24 | 3.63 ± 0.11 | 2.69 ± 0.16 | 2.53 ± 0.09 | 2.47 ± 0.08 |
-| DPP  | 4.61 ± 0.26 | 3.97 ± 0.20 | 3.72 ± 0.07 | 2.59 ± 0.07 | 2.42 ± 0.06 | 2.31 ± 0.06 |
-| **Ours** | **4.79 ± 0.28** | **4.29 ± 0.16** | **4.14 ± 0.19** | **2.82 ± 0.11** | **2.66 ± 0.11** | **2.51 ± 0.06** |
-| Method | FID @ 3.0 | FID @ 5.0 | FID @ 7.5 | CLIP Score @ 3.0 | CLIP Score @ 5.0 | CLIP Score @ 7.5 |
-| --- | --- | --- | --- | --- | --- | --- |
-| PG   | 142.82 ± 3.12 | 142.88 ± 2.71 | 142.07 ± 5.60 | 27.65 ± 0.15 | 26.70 ± 0.12 | 26.48 ± 0.17 |
-| CADS | 126.75 ± 1.23 | 125.96 ± 0.52 | 125.17 ± 0.64 | 27.19 ± 0.09 | 26.57 ± 0.07 | 26.57 ± 0.14 |
-| DPP  | 139.64 ± 4.07 | 138.31 ± 2.76 | 138.62 ± 4.79 | 27.82 ± 0.10 | 27.30 ± 0.10 | 26.88 ± 0.09 |
-| **Ours** | **128.80 ± 1.27** | **127.64 ± 1.30** | **126.17 ± 1.45** | **27.65 ± 0.12** | **27.18 ± 0.11** | **26.80 ± 0.10** |
 
 
 
 
 > Question 3 – Are hyperparameters consistent across models?
 
-**Response.** To assess how portable our hyperparameters are, we applied OSCAR not only to FM-SD3.5 (our main backbone), but also to two additional and very different text-to-image models: **SDXL-Turbo** and **SD1.5**. For each new backbone we first **directly reused** the hyperparameters tuned on FM-SD3.5 (“OSCAR (default params)”), and then performed a light model-specific tuning (“OSCAR (tuned params)”). All results are averaged over 6 seeds (mean ± 95% CI):
+**Response.** To assess how portable our hyperparameters are, we applied OSCAR not only to FM-SD3.5, but also to two additional and very different text-to-image models: **SDXL-Turbo** and **SD1.5**. For each new backbone we first **directly reused** the hyperparameters tuned on FM-SD3.5 (“OSCAR (default params)”), and then performed a light model-specific tuning (“OSCAR (tuned params)”). All results are averaged over 6 seeds (mean ± 95% CI):
 
 | Model       | Variant                | CLIP ↑             | Vendi (Pixel) ↑    | Vendi (Inception) ↑ | FID ↓              | BRISQUE ↓          |
 |------------|------------------------|--------------------|--------------------|---------------------|--------------------|--------------------|
@@ -229,10 +221,10 @@ Overall, while the aggregated mean ± std in Table 1 can appear conservative due
 
 We observe the following:
 
-- **Direct transferability.** Using the **same hyperparameters** tuned on FM-SD3.5 already yields **robust behavior** on both SDXL-Turbo and SD1.5: diversity metrics improve slightly over the baselines and, importantly, there is **no degradation in key quality metrics** (FID/BRISQUE) within the confidence intervals.
-- **Lightweight model-specific tuning.** A small amount of additional tuning (mainly on the noise scale and gating interval, using a coarse grid) yields **consistent gains** in both fidelity and diversity for each backbone.
+- **Direct transferability.** Using the **same hyperparameters** tuned on FM-SD3.5 already yields **robust behavior** on both SDXL-Turbo and SD1.5: diversity metrics improve slightly over the baselines and, importantly, there is **no degradation in key quality metrics**  within the confidence intervals.
+- **Lightweight model-specific tuning.** A small amount of additional tuning yields **consistent gains** in both fidelity and diversity for each backbone.
 
-These results indicate that OSCAR’s hyperparameters are **largely consistent across different models**—a single setting works reasonably well out of the box—while **optional, lightweight per-model tuning** can further refine performance. This supports our claim that OSCAR is a general, plug-and-play framework rather than an architecture-specific method.
+These results indicate that OSCAR’s hyperparameters are largely consistent across different models—a single setting works reasonably well out of the box—while **optional, lightweight per-model tuning** can further refine performance. This supports our claim that OSCAR is a general, plug-and-play framework rather than an architecture-specific method.
 
 **Best regards,**
 **Authors**
@@ -250,7 +242,7 @@ These results indicate that OSCAR’s hyperparameters are **largely consistent a
 
 We agree that it is important to verify that OSCAR does not harm single-image fidelity on a broad, unbiased prompt distribution. To this end, we conducted an additional evaluation on **400 ImageNet-style prompts**, following the reviewer’s suggestion:
 
-- We randomly sample **400 classes** from ImageNet-256 and construct one text prompt per class (1 prompt per class).
+- We randomly sample **400 classes** from ImageNet-256 and construct one text prompt per class.
 - For each prompt, we generate **a single image** and compute standard quality and alignment metrics over the resulting 400-image set.
 
 The results are summarized below:
@@ -263,7 +255,7 @@ The results are summarized below:
 | PG          | 99.7   | 3.66            | 34.34               | 18.13 ± 0.24         |
 | **OSCAR**   | **99.3** | **3.85**      | **36.40**           | **18.08 ± 0.24**     |
 
-OSCAR achieves the **best FID** and the best ImageReward and Vendi scores among all methods, indicating that our diversity-enhancing guidance does **not** introduce systematic quality degradation even when each prompt only produces a single image. The CLIPScore of OSCAR is statistically indistinguishable from the baselines (all within the reported confidence intervals), confirming that text–image alignment is preserved. Overall, this large-scale random-prompt evaluation supports that OSCAR maintains (and in some aspects slightly improves) single-sample quality while providing stronger set-level diversity.
+OSCAR achieves the **best FID** and the best ImageReward and Vendi scores among all methods, indicating that our diversity-enhancing guidance does **not** introduce systematic quality degradation even when each prompt only produces a single image. The CLIPScore of OSCAR is statistically indistinguishable from the baselines, confirming that text–image alignment is preserved. Overall, this large-scale random-prompt evaluation supports that OSCAR maintains single-sample quality while providing stronger set-level diversity.
 
 > Weakness 2 – Feature-space dependence of the volume objective
 
@@ -275,34 +267,33 @@ OSCAR achieves the **best FID** and the best ImageReward and Vendi scores among 
 | DINO           | 28.35 ± 0.17       | 2.82 ± 0.05       | 5.57 ± 0.24         | 164.2 ± 2.0        | 21.1 ± 1.8         |
 | **CLIP (ours)** | **28.26 ± 0.22** | **2.86 ± 0.05**   | **5.63 ± 0.20**     | **163.3 ± 1.6**    | **21.2 ± 1.5**     |
 
-Across all three encoders, the results are **highly comparable** on both fidelity (FID, BRISQUE) and alignment (CLIP Score), and the diversity metrics vary only slightly within overlapping confidence intervals. This indicates that OSCAR’s benefits are **not tied to a specific feature space**; its core mechanism remains effective under feature spaces with different inductive biases (CLIP, DINO, Inception).
+Across all three encoders, the results are **highly comparable** on both fidelity and alignment, and the diversity metrics vary only slightly within overlapping confidence intervals. This indicates that OSCAR’s benefits are **not tied to a specific feature space**; its core mechanism remains effective under feature spaces with different inductive biases.
 
 We keep **CLIP** as our default encoder because it offers a mild but consistent advantage in diversity metrics while maintaining competitive fidelity. In the revised paper we will add this ablation and explicitly emphasize that OSCAR is **robust to the encoder choice** and is not simply exploiting a particular representation.
 
 
 > Weakness 3 – Relation to high-order samplers (e.g., DPM-Solver++, UniPC)
 
-**Response.** We appreciate this question and agree that the relationship to high-order samplers should be clarified.
 
 Conceptually, **high-order samplers** such as DPM-Solver++ and UniPC operate purely at the **numerical analysis level**. They take a *fixed* continuous-time generative ODE/SDE
 \[
 \mathrm{d}x_t = f_\theta(x_t, t)\,\mathrm{d}t \quad (\text{or } + \sigma(t)\,\mathrm{d}W_t)
 \]
-and design higher-order schemes whose goal is to approximate the same dynamics more accurately (i.e., reduce discretization error) without changing the learned velocity field \(f_\theta\).
+and design higher-order schemes whose goal is to approximate the same dynamics more accurately without changing the learned velocity field \(f_\theta\).
 
-By contrast, **OSCAR explicitly modifies the dynamics themselves**. We add an orthogonal drift and noise,
+By contrast, OSCAR explicitly modifies the dynamics themselves. We add an orthogonal drift and noise,
 $$
 \mathrm{d}x_t = \bigl[f_\theta(x_t,t) + g_\perp(x_t,t)\bigr]\mathrm{d}t + \sigma(t)\,\Pi_\perp(x_t,t)\,\mathrm{d}W_t.
 $$
-where \(g_\perp\) and the projection \(\Pi_\perp\) are constructed to spread particles laterally in feature space (i.e., across directions orthogonal to the high-density flow). This introduces a **controlled bias** relative to the original FM dynamics, trading exactness for improved set-level diversity and coverage.
+where \(g_\perp\) and the projection \(\Pi_\perp\) are constructed to spread particles laterally in feature space. This introduces a **controlled bias** relative to the original FM dynamics, trading exactness for improved set-level diversity and coverage.
 
 From a numerical perspective, however, there is **no conflict** between OSCAR and high-order samplers:
 
-- We can view OSCAR as defining a *new* controlled vector field \(f_\theta^{\text{OSCAR}} = f_\theta + g_\perp\) and (optionally) a modified noise covariance.
+- We can view OSCAR as defining a *new* controlled vector field \(f_\theta^{\text{OSCAR}} = f_\theta + g_\perp\) and a modified noise covariance.
 - Any integrator—Euler, Heun, DPM-Solver++, UniPC—can then be applied to this modified ODE/SDE by simply plugging in \(f_\theta^{\text{OSCAR}}\) and the projected noise.  
 - The order of accuracy of the solver (second, third, etc.) is preserved **with respect to the controlled dynamics**. Orthogonal control does not break the consistency of the solver; it only changes the target dynamics it is accurately integrating.
 
-In other words, **OSCAR is complementary to high-order samplers**: the former changes the dynamics to encourage diversity (introducing a small, explicitly controlled bias), while the latter can still be used to integrate those dynamics with high accuracy and fewer steps. In this work we focus on a Heun-style integrator for simplicity and to keep the comparison with standard FM transparent. In the revised version we will add a short discussion making this relationship explicit, and we view combining OSCAR with DPM-Solver++/UniPC as a promising direction for future work.
+In other words, **OSCAR is complementary to high-order samplers**: the former changes the dynamics to encourage diversity, introducing a small, explicitly controlled bias, while the latter can still be used to integrate those dynamics with high accuracy and fewer steps. In this work we focus on a Heun-style integrator for simplicity and to keep the comparison with standard FM transparent. In the revised version we will add a short discussion making this relationship explicit, and we view combining OSCAR with DPM-Solver++/UniPC as a promising direction for future work.
 
 
 **Best regards,**
@@ -334,7 +325,7 @@ This clarifies several points:
 
 - The **naïve variant without OP and RR** aggressively optimizes the diversity objective but lacks any fidelity safeguards. It indeed achieves a high Vendi (Pixel), but this comes from **strong local noise and “colorful artifacts”** that inflate pixel-space dispersion while severely damaging global structure. Consequently, **FID, BRISQUE and Vendi (Inception)** all deteriorate dramatically, and CLIP alignment also drops. This explains why the naïve variant underperforms training-free baselines in terms of overall quality.
 - Adding **RR** or **OP** individually partially stabilizes the dynamics (improving FID/BRISQUE relative to the naïve variant), but both are still clearly worse than the baselines and the full method.
-- When **both OP and RR are enabled (full OSCAR)**, the method recovers and surpasses the FM baseline and all prior methods on both diversity and fidelity metrics.
+- When **both OP and RR are enabled**, the method recovers and surpasses the FM baseline and all prior methods on diversity metrics.
 
 In other words, OP and RR are not cosmetic; they are **essential safeguards** that turn a very strong but unstable diversity drive into a practical sampler. The large drops when removing OP or RR are precisely because the ablated variants revert towards the unstable naïve dynamics. We have re-checked our evaluation pipeline during these new experiments, and the results now make the individual contributions of OP and RR explicit.
 
@@ -369,7 +360,7 @@ In our initial submission, we calculated PRD using $k=20$ clusters. However, giv
 
 To address this, we have adopted the standard "Square-root Choice" for histogram estimation ($k \approx \sqrt{N}$), adjusting the number of clusters to $k=6$. This correction effectively eliminates the discretization artifacts, ensuring that the AUC calculation is numerically robust and that the plotted curves accurately represent the density estimation.
 
-To demonstrate that this correction reflects genuine performance gains rather than parameter tuning, we have significantly expanded our evaluation scope. We added three new diverse concepts (*apple, suitcase, pizza*) to the original set (*truck, bus, bicycle*), re-evaluating all methods across these 6 concepts at 3 CFG levels. Under this rigorous setting, the updated PRD curves are smooth and visually consistent with the metrics, and OSCAR demonstrates superior performance in 15 out of 18 scenarios, confirming a robust advantage in the Recall-Precision trade-off. We have updated Figure 3 and Figure 8 accordingly.
+To demonstrate that this correction reflects genuine performance gains rather than parameter tuning, we have significantly expanded our evaluation scope. We added three new diverse concepts (*apple, suitcase, pizza*) to the original set (*truck, bus, bicycle*), re-evaluating all methods across these 6 concepts at 3 CFG levels. Under this rigorous setting, the updated PRD curves are smooth and visually consistent with the metrics, and OSCAR demonstrates better performance in 14 out of 18 scenarios, confirming a robust advantage in the Recall-Precision trade-off. We have updated Figure 3 and Figure 8 accordingly. Also we add results in Appendix B.
 | Method | CFG | Apple | Suitcase | Pizza | Truck | Bus | Bicycle |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **DPP** | 3.0 | 0.266 | 0.251 | 0.304 | 0.327 | 0.487 | 0.401 |
@@ -385,16 +376,29 @@ To demonstrate that this correction reflects genuine performance gains rather th
 | | 5.0 | **0.270** | **0.250** | 0.302 | **0.334** | 0.547 | 0.359 |
 | | 7.5 | **0.280** | **0.239** | **0.324** | 0.212 | **0.592** | **0.423** |
 
-> Weakness 4
+> Weakness 4 regarding "Mixed Performance" and "Class Subsets"
 
+We believe there may be a slight misunderstanding regarding our definition of a "set" and the aggregation protocol. We clarify these definitions below and provide additional experimental results on random concepts to demonstrate robustness.
+
+**1. Clarification on "Set-Level" Definition and Protocol**
+In our problem formulation, **"set-level diversity"** refers to the diversity within a batch of images generated for a single conditioning concept by varying the initial random seeds, rather than evaluating on subsets of different classes.
+* For each concept, we utilize 5 distinct synonymous prompts. For each prompt, we run multiple random seeds to generate a batch of images.
+* The metrics reported in Tables 1, 4, and 5 are calculated on the aggregated set of all images generated for that specific concept. Therefore, the variance reported in these tables already reflects the stability across different seeds and prompts for that class.
+
+**2. New Experiments: Random Concepts & Variance Analysis**
+To address the request for "expected diversity over random class subsets" and further prove robustness:
+*  We randomly selected 3 distinct concepts from COCO: **"Apple"**, **"Pizza"**, and **"Suitcase"**. We evaluated them using the same prompt. OSCAR consistently outperforms the strongest baseline in diversity metrics.
+
+* **Prompt-level Variance:** We have also included a detailed **Prompt-level analysis**. This reports the mean and variance of diversity metrics for individual prompts within the "truck" concept, confirming that our gains are statistically significant and not driven by outliers. 
+* All results have been shown in Appendix B.
 
 
 > Question 1 – Wall-clock inference time, FLOPs, and role of Heun
 
-**Response.** Thank you for raising this point and for catching a possible source of confusion about Heun.
+Thank you for raising this point and for catching a possible source of confusion about Heun.
 
 1. **Clarifying the role of “Heun” in OSCAR.**  
-   In our work, “Heun” refers to a **mathematical extrapolation scheme in feature space**, not to a separate pretrained network or a different sampler for the underlying FM backbone. Concretely, we use a Heun-style formula to predict the **final feature vector** from the current and initial feature vectors; this endpoint predictor is used only inside our diversity objective. All baselines and OSCAR share the **same FM backbone, the same NFE (30 steps), the same CFG (5.0), and the same particle count**. The extra Heun-based predictor in OSCAR reuses quantities already computed along the trajectory and adds only lightweight linear operations in feature space. It does **not** introduce additional neural network evaluations beyond those reflected in our FLOPs numbers, and it does **not** accelerate or change the base sampler dynamics for the baselines.
+   In our work, “Heun” refers to a **mathematical extrapolation scheme in feature space**, not to a separate pretrained model or a different sampler for the underlying FM backbone. Concretely, we use a Heun-style formula to predict the **final feature vector** from the current and initial feature vectors; this endpoint predictor is used only inside our diversity objective. All baselines and OSCAR share the **same FM backbone, the same NFE (30 steps), the same CFG (5.0), and the same particle count**. The extra Heun-based predictor in OSCAR reuses quantities already computed along the trajectory and adds only lightweight linear operations in feature space. It does not introduce additional neural network evaluations beyond those reflected in our FLOPs numbers, and it does not accelerate or change the base sampler dynamics for the baselines.
 
 2. **Measured computational cost.**  
    To quantify the actual overhead of OSCAR relative to the baselines, we measure total FLOPs, wall-clock time per set, and peak VRAM under identical generation settings (NFE = 30, CFG = 5.0, batch size = 32, 512×512 resolution) on an NVIDIA A6000 GPU:
@@ -431,7 +435,7 @@ For each backbone, we first **directly reused** the hyperparameters tuned on FM-
 
 We observe that:
 
-- With **default (transferred) hyperparameters**, OSCAR already yields **robust behavior**: diversity metrics improve slightly, and key quality metrics (FID, BRISQUE) remain at least on par with each backbone’s baseline.
+- With **default (transferred) hyperparameters**, OSCAR already yields **robust behavior**: diversity metrics improve slightly, and key quality metrics remain at least on par with each backbone’s baseline.
 - With **minimal model-specific tuning**, OSCAR consistently **improves both diversity and fidelity**, across FM-SD3.5, SDXL-Turbo, and SD1.5.
 
 These results demonstrate that OSCAR is **not tied to a single architecture**, but rather functions as a general, plug-and-play diversity controller that can be ported to diverse diffusion/flow models with little or no additional tuning.

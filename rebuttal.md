@@ -6,8 +6,8 @@
 
 > Weakness 1 Missing simplest FM baselines  / compute-matched comparison
 
-1. **Simple FM baseline with \(N\) independent samples.**  
-   In the revised manuscript, Table 1 now includes a “FM-SD3.5 (N particles)” baseline that generates \(N\) independent samples from the same Stable Diffusion 3.5 flow-matching model used by OSCAR, with identical NFE, prompts, and model settings. This isolates the effect of our orthogonal stochastic control from simply increasing the number of samples drawn from the base model.
+1. **Simple FM baseline with $N$ independent samples.**  
+   In the revised manuscript, Table 1 now includes a “FM-SD3.5 (N particles)” baseline that generates $N$ independent samples from the same Stable Diffusion 3.5 flow-matching model used by OSCAR, with identical NFE, prompts, and model settings. This isolates the effect of our orthogonal stochastic control from simply increasing the number of samples drawn from the base model.
 
 2. **Compute-matched comparison.**  
    We further include a compute-matched study in Appendix E Table 13, where we compare OSCAR to two strengthened FM-SD3.5 variants under approximately matched FLOPs: (i) increasing the number of particles, and (ii) increasing the NFE. The results are summarized below:
@@ -25,17 +25,17 @@
 
 Regarding the visual comparison for the ablation study, we fully agree that showing the full OSCAR model alongside the ablated variants is essential for directly inspecting the impact of each component. However, due to layout constraints in the main text, we were unable to expand Figure 6 to include these additional columns without compromising legibility. Therefore, we have included this comprehensive side-by-side comparison in Appendix G of the revised manuscript. We have also updated the caption of Figure 6 in the main text to explicitly direct readers to these additional qualitative results.
 
-> Weakness 3 & Question 1 – Definition and role of \(t_{\text{gate}}\)
+> Weakness 3 & Question 1 – Definition and role of $t_{\text{gate}}$
 
-- In our final convention, **\(t_{\text{gate}}\)** is a **scalar end-time of noise injection**: the stochastic term is active on the interval \([t_{\text{start}}, t_{\text{gate}}]\). In all robustness ablations in the main paper, we fix \(t_{\text{start}} = 0.05\) and sweep \(t_{\text{gate}}\); this is what Fig. 7(c) and Table 17 are visualizing.
-- The **interval notation** \([t_{\text{start}}, t_{\text{end}}]\) that appears in parts of the appendix is a leftover from an earlier draft where we denoted the gate by its start and end times. In the final implementation and experiments, we use \(t_{\text{end}} \equiv t_{\text{gate}}\). We will unify the notation across the main text, figures, and appendix to always use \([t_{\text{start}}, t_{\text{gate}}]\).
+- In our final convention, **$t_{\text{gate}}$** is a **scalar end-time of noise injection**: the stochastic term is active on the interval $[t_{\text{start}}, t_{\text{gate}}]$. In all robustness ablations in the main paper, we fix $t_{\text{start}} = 0.05$ and sweep $t_{\text{gate}}$; this is what Fig. 7(c) and Table 17 are visualizing.
+- The **interval notation** $[t_{\text{start}}, t_{\text{end}}]$ that appears in parts of the appendix is a leftover from an earlier draft where we denoted the gate by its start and end times. In the final implementation and experiments, we use $t_{\text{end}} \equiv t_{\text{gate}}$. We will unify the notation across the main text, figures, and appendix to always use $[t_{\text{start}}, t_{\text{gate}}]$.
 - Fundamentally, $t_{\text{gate}}$ serves as a practical **engineering heuristic** to ensure the final image quality. In SDE-based sampling, injecting noise up to the very last step ($t=1$) prevents the solver from settling onto the clean data manifold, leaving residual noise. Therefore, $t_{\text{gate}}$ is simply a switch to turn off stochasticity near the end to guarantee convergence, it is not a theoretical hyperparameter coupled with our core orthogonal control algorithm.
 - We respectfully clarify that the degradation observed in Section 5.2 does **not** imply parameter sensitivity, but rather demonstrates the **necessity of the gate mechanism**.
 
 - * **Section 5.2 :** This ablation compared a standard gate against the **extreme case** of full-trajectory noise ($t_{\text{gate}} = 1.0$). The substantial performance degradation here simply confirms that *some* gate is required to ensure convergence.
 - * **Appendix F :** To demonstrate robustness, we swept $t_{\text{gate}}$ across a wide reasonable range in **Appendix F 4.1 (Table 17)**. The results show that within this broad operational range, performance is highly stable and does not degrade, proving that the method is **not sensitive** to the precise value of $t_{\text{gate}}$.
 
-Regarding Fig. 15, the confusion partly comes from an earlier **convention switch** between DDPM-style and flow-matching time parameterization: DDPM and flow matching define \(x_0\) / \(x_T\) in opposite ways. We initially followed the DDPM convention (\(x_0\) = clean image) but finalized on the flow-matching convention (\(x_0\) = noise). The current Fig. 15 caption still reflects the earlier wording. We have corrected this caption and the related notation in the revised version.
+Regarding Fig. 15, the confusion partly comes from an earlier **convention switch** between DDPM-style and flow-matching time parameterization: DDPM and flow matching define $x_0$ / $x_T$ in opposite ways. We initially followed the DDPM convention ($x_0$ = clean image) but finalized on the flow-matching convention ($x_0$ = noise). The current Fig. 15 caption still reflects the earlier wording. We have corrected this caption and the related notation in the revised version.
 
 **Best regards,** 
 **Authors**
@@ -54,7 +54,7 @@ Regarding Fig. 15, the confusion partly comes from an earlier **convention switc
 
 We agree that our wording was imprecise here, and we thank the reviewer for pointing this out.
 
-The target distribution in Fig. 2 is a **uniformly weighted \(3\times3\) Gaussian mixture** with shared diagonal covariance. Concretely, we learn a flow from a standard Gaussian $p_0 = \mathcal{N}(0,I)$ to $ p_1 = \tfrac{1}{9}\sum_{k=1}^{9}\mathcal{N}(\mu_k,\sigma^2 I),$ where the black “+” markers in the plot indicate the component means \(\{\mu_k\}\). The three columns show particle locations at early, middle, and final sampling steps under the **same step budget** for Standard FM and OSCAR.
+The target distribution in Fig. 2 is a **uniformly weighted $3\times3$ Gaussian mixture** with shared diagonal covariance. Concretely, we learn a flow from a standard Gaussian $p_0 = \mathcal{N}(0,I)$ to $ p_1 = \tfrac{1}{9}\sum_{k=1}^{9}\mathcal{N}(\mu_k,\sigma^2 I),$ where the black “+” markers in the plot indicate the component means $\{\mu_k\}$. The three columns show particle locations at early, middle, and final sampling steps under the **same step budget** for Standard FM and OSCAR.
 
 Both Standard FM and OSCAR correctly match the GMM at the final step; the purpose of the figure is **not** to claim that Standard FM suffers from permanent mode collapse, but rather to visualize differences in the **finite-step trajectories**. At intermediate steps, Standard FM tends to produce more clustered particles, with intra-mode under-dispersion and some inter-mode mixing, while OSCAR maintains distributional correctness and yields more uniform within-mode coverage and clearer separation between modes, corresponding to higher diversity under a fixed step budget.
 
@@ -66,7 +66,7 @@ To avoid confusion, in the revised manuscript we will:
 > Weakness 2
 
 1. **Heun endpoint predictor is not a separate pretrained model, and its choice is robust.**  
-   The “Heun second-order extrapolation” in Algorithm 1 is a **standard numerical integrator**, not a separate neural network. At each step, we evaluate the same FM backbone twice (as in a usual second-order solver) and use these two evaluations to form a **closed-form extrapolation of the feature trajectory**, which we denote as the endpoint predictor \(\hat\psi\). Thus:
+   The “Heun second-order extrapolation” in Algorithm 1 is a **standard numerical integrator**, not a separate neural network. At each step, we evaluate the same FM backbone twice (as in a usual second-order solver) and use these two evaluations to form a **closed-form extrapolation of the feature trajectory**, which we denote as the endpoint predictor $\hat\psi$. Thus:
    - there is **no additional pretrained feature predictor** beyond the base FM model;
    - Heun adds only **one extra backbone evaluation per step**, which is already accounted for in the reported NFE.
 
@@ -89,41 +89,41 @@ To avoid confusion, in the revised manuscript we will:
 > Weakness 3 – Equation (3) and the notion of “volume”
 
 **(i) Why Eq. (3) represents a volume notion.**  
-Given a set of feature vectors with empirical covariance \(\Sigma\), classical results from multivariate analysis tell us that the ellipsoid
+Given a set of feature vectors with empirical covariance $\Sigma$, classical results from multivariate analysis tell us that the ellipsoid
 \[
 E = \{x \,:\, x^\top \Sigma^{-1} x \le 1\}
 \]
-has volume \(\mathrm{Vol}(E) = C_d \cdot (\det \Sigma)^{1/2}\), where \(C_d\) depends only on the dimension \(d\). Thus, the quantity \(\log \det \Sigma\) (up to an additive constant) is a standard surrogate for the **log-volume** occupied by the sample cloud in feature space. Our Eq. (3) is exactly a **smoothed log-volume** of this form: in the limit \(\tau \to 0\) and \(\varepsilon \to 0\), it reduces to the log-determinant of a covariance-like matrix, whose exponential is proportional to the volume of the associated covariance ellipsoid. In the revision we will make this geometric interpretation explicit in the main text and add a short citation to standard treatments of covariance ellipsoids in multivariate analysis.
+has volume $\mathrm{Vol}(E) = C_d \cdot (\det \Sigma)^{1/2}$, where $C_d$ depends only on the dimension $d$. Thus, the quantity $\log \det \Sigma$ (up to an additive constant) is a standard surrogate for the **log-volume** occupied by the sample cloud in feature space. Our Eq. (3) is exactly a **smoothed log-volume** of this form: in the limit $\tau \to 0$ and $\varepsilon \to 0$, it reduces to the log-determinant of a covariance-like matrix, whose exponential is proportional to the volume of the associated covariance ellipsoid. In the revision we will make this geometric interpretation explicit in the main text and add a short citation to standard treatments of covariance ellipsoids in multivariate analysis.
 
-**(ii) Role of the hyperparameters \(\tau\) and \(\varepsilon\).**  
-As discussed in the “Hyperparameters Setup” paragraph of the appendix, \(\tau\) and \(\varepsilon\) are introduced purely for **numerical stability**, not to change the semantics of the objective:
+**(ii) Role of the hyperparameters $\tau$ and $\varepsilon$.**  
+As discussed in the “Hyperparameters Setup” paragraph of the appendix, $\tau$ and $\varepsilon$ are introduced purely for **numerical stability**, not to change the semantics of the objective:
 
-- \(\tau > 0\) is a very small regularization term that keeps the covariance-like matrix well-conditioned and ensures that the gradient of the objective remains well-defined and non-vanishing even when several particles nearly coincide in feature space.
-- \(\varepsilon > 0\) is a tiny offset inside the logarithm, used only to prevent taking \(\log 0\) or \(\log\) of negative/near-zero quantities, thereby guaranteeing that the computed “volume” is non-negative and finite.
+- $\tau > 0$ is a very small regularization term that keeps the covariance-like matrix well-conditioned and ensures that the gradient of the objective remains well-defined and non-vanishing even when several particles nearly coincide in feature space.
+- $\varepsilon > 0$ is a tiny offset inside the logarithm, used only to prevent taking $\log 0$ or $\log$ of negative/near-zero quantities, thereby guaranteeing that the computed “volume” is non-negative and finite.
 
-Both \(\tau\) and \(\varepsilon\) are fixed to **very small constants** and are not tuned per experiment. In all practical settings they only become active in degenerate configurations where the empirical covariance is almost singular; in the non-degenerate regime they do not alter the ordering of configurations induced by the volume objective and thus do not affect the reported results.
+Both $\tau$ and $\varepsilon$ are fixed to **very small constants** and are not tuned per experiment. In all practical settings they only become active in degenerate configurations where the empirical covariance is almost singular; in the non-degenerate regime they do not alter the ordering of configurations induced by the volume objective and thus do not affect the reported results.
 
-We will clarify these points in the revised manuscript so that Eq. (3) is clearly understood as a standard, smoothed log-volume objective, and \(\tau,\varepsilon\) are seen as technical stabilizers rather than substantive modeling hyperparameters.
+We will clarify these points in the revised manuscript so that Eq. (3) is clearly understood as a standard, smoothed log-volume objective, and $\tau,\varepsilon$ are seen as technical stabilizers rather than substantive modeling hyperparameters.
 
 
 
 > Weakness 4 – Explanation of Eq. (4)
 
-Eq. (4) is simply the gradient of the energy \(\mathcal{E}_s(Z)\) with respect to the sampler’s state variable \(x\). Recall that each feature vector is defined as
-\[
+Eq. (4) is simply the gradient of the energy $\mathcal{E}_s(Z)$ with respect to the sampler’s state variable $x$. Recall that each feature vector is defined as
+$$
 z_i = \phi(u_i), \quad u_i = \hat\psi(x_i,t),
-\]
-so the dependence of \(\mathcal{E}_s(Z)\) on \(x_i\) is through the composition \(x_i \mapsto u_i \mapsto z_i\). Starting from the feature-space gradient \([\nabla_Z \mathcal{E}_s(Z)]_i\), we pull it back to the state space via the chain rule, which yields
-\[
+$$
+so the dependence of $\mathcal{E}_s(Z)$ on $x_i$ is through the composition $x_i \mapsto u_i \mapsto z_i$. Starting from the feature-space gradient $[\nabla_Z \mathcal{E}_s(Z)]_i$, we pull it back to the state space via the chain rule, which yields
+$$
 g_i(x_i,t)
 = \bigl(J_x \hat\psi(x_i,t)\bigr)^\top
   \bigl(J_u \phi(u)\bigr)^\top
   \bigl[\nabla_Z \mathcal{E}_s(Z)\bigr]_i
   \Big|_{u=\hat\psi(x_i,t)},
-\]
-where \([\cdot]_i\) denotes the component for the \(i\)-th sample.
+$$
+where $[\cdot]_i$ denotes the component for the $i$-th sample.
 
-In practice, we compute this pullback efficiently using **two reverse-mode vector–Jacobian products (VJPs)**—first through \(\phi\), then through \(\hat\psi\)—without ever forming the Jacobian matrices explicitly. In the revised version, we will (i) add this chain-rule explanation and the sign convention immediately after Eq. (4), and (ii) explicitly point to Appendix B, Lemma 1, which provides the formal derivation showing that Eq. (4) is exactly the pullback of the feature-space gradient to the sampler’s state space.
+In practice, we compute this pullback efficiently using **two reverse-mode vector–Jacobian products (VJPs)**—first through $\phi$, then through $\hat\psi$—without ever forming the Jacobian matrices explicitly. In the revised version, we will (i) add this chain-rule explanation and the sign convention immediately after Eq. (4), and (ii) explicitly point to Appendix B, Lemma 1, which provides the formal derivation showing that Eq. (4) is exactly the pullback of the feature-space gradient to the sampler’s state space.
 
 
 > weakness 5 regarding the term "Stochastic Control"
@@ -276,21 +276,21 @@ We keep **CLIP** as our default encoder because it offers a mild but consistent 
 
 
 Conceptually, **high-order samplers** such as DPM-Solver++ and UniPC operate purely at the **numerical analysis level**. They take a *fixed* continuous-time generative ODE/SDE
-\[
-\mathrm{d}x_t = f_\theta(x_t, t)\,\mathrm{d}t \quad (\text{or } + \sigma(t)\,\mathrm{d}W_t)
-\]
-and design higher-order schemes whose goal is to approximate the same dynamics more accurately without changing the learned velocity field \(f_\theta\).
+$$
+\mathrm{d}x_t = f_\theta(x_t, t)\,\mathrm{d}t
+$$
+and design higher-order schemes whose goal is to approximate the same dynamics more accurately without changing the learned velocity field $f_\theta$.
 
 By contrast, OSCAR explicitly modifies the dynamics themselves. We add an orthogonal drift and noise,
 $$
 \mathrm{d}x_t = \bigl[f_\theta(x_t,t) + g_\perp(x_t,t)\bigr]\mathrm{d}t + \sigma(t)\,\Pi_\perp(x_t,t)\,\mathrm{d}W_t.
 $$
-where \(g_\perp\) and the projection \(\Pi_\perp\) are constructed to spread particles laterally in feature space. This introduces a **controlled bias** relative to the original FM dynamics, trading exactness for improved set-level diversity and coverage.
+where $g_\perp$ and the projection $\Pi_\perp$ are constructed to spread particles laterally in feature space. This introduces a **controlled bias** relative to the original FM dynamics, trading exactness for improved set-level diversity and coverage.
 
 From a numerical perspective, however, there is **no conflict** between OSCAR and high-order samplers:
 
-- We can view OSCAR as defining a *new* controlled vector field \(f_\theta^{\text{OSCAR}} = f_\theta + g_\perp\) and a modified noise covariance.
-- Any integrator—Euler, Heun, DPM-Solver++, UniPC—can then be applied to this modified ODE/SDE by simply plugging in \(f_\theta^{\text{OSCAR}}\) and the projected noise.  
+- We can view OSCAR as defining a *new* controlled vector field $f_\theta^{\text{OSCAR}} = f_\theta + g_\perp$ and a modified noise covariance.
+- Any integrator—Euler, Heun, DPM-Solver++, UniPC—can then be applied to this modified ODE/SDE by simply plugging in $f_\theta^{\text{OSCAR}}$ and the projected noise.  
 - The order of accuracy of the solver (second, third, etc.) is preserved **with respect to the controlled dynamics**. Orthogonal control does not break the consistency of the solver; it only changes the target dynamics it is accurately integrating.
 
 In other words, **OSCAR is complementary to high-order samplers**: the former changes the dynamics to encourage diversity, introducing a small, explicitly controlled bias, while the latter can still be used to integrate those dynamics with high accuracy and fewer steps. In this work we focus on a Heun-style integrator for simplicity and to keep the comparison with standard FM transparent. In the revised version we will add a short discussion making this relationship explicit, and we view combining OSCAR with DPM-Solver++/UniPC as a promising direction for future work.

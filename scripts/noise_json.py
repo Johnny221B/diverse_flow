@@ -822,7 +822,7 @@ def parse_args():
 
     # 输出与方法名
     ap.add_argument('--out', type=str, default=None)
-    ap.add_argument('--method', type=str, default='noise')
+    ap.add_argument('--method', type=str, default='ourmethod')
 
     # 多样性目标（方法相关）
     ap.add_argument('--gamma0', type=float, default=0.12)

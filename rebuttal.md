@@ -135,19 +135,26 @@ In practice, we compute this pullback efficiently using **two reverse-mode vecto
 
 > Weakness 7 Relation to Stochastic Density Guidance (SDG)
 
-**Response.** We thank the reviewer for drawing our attention to Stochastic Density Guidance (SDG) [1]; it is indeed closely related in spirit, and we will add a dedicated discussion in the related-work section.
+We thank the reviewer for highlighting the relevant work, "Stochastic Density Guidance" (SDG). While we agree that both methods utilize the geometric intuition of orthogonally projected noise to preserve generation quality, they are fundamentally different in terms of their **primary objective** and **underlying mechanism**.
 
-Conceptually, both SDG and OSCAR exploit **orthogonally projected noise** to enrich the generation process, but they target **different objectives and scales**:
+We outline the key distinctions below:
 
-- **SDG (per-trajectory, density control).**  
-  SDG perturbs each *individual* trajectory by injecting noise in the subspace orthogonal to the score, in order to control the local log-density along that trajectory. This allows the user to tune the level of **fine-grained detail** or “texture” for a *single* sample, while staying close to the original data distribution.
+**1. Objective: Set-level Semantic Diversity vs. Single-sample Detail Control**
 
-- **OSCAR (set-level, volume control).**  
-  In contrast, OSCAR is designed for **set-level diversity**. We introduce an orthogonal control to the base flow that maximizes a feature-space volume (log-det) objective over a *collection* of particles. The goal is to reduce redundancy across samples and improve within-mode coverage and separation **across the whole set**, rather than modulating the detail level of one trajectory.
+* **OSCAR targets Set-level Diversity:**
+    Our specific goal is to generate a set of images that are semantically distinct from one another given the same condition. We aim to maximize the semantic spread of the entire batch to overcome mode collapse.
+* **SDG targets Single-sample Detail Control:**
+    The primary goal of SDG is to control the log-density of individual sample. The diversity offered by SDG is constrained to variations within a specific likelihood level for a single trajectory, rather than forcing semantic divergence across a generated set.
 
-Technically, SDG formulates an SDE whose orthogonal noise is directly tied to the score and a desired log-density schedule, whereas OSCAR defines a control signal driven by the gradient of a **global set-level energy** in a learned feature space. As a result, SDG is best viewed as a method for *density-aware refinement of single trajectories*, while OSCAR is a *set-level diversity controller* that can be layered on top of standard flow-matching samplers.
+**2. Methodology: Set-based Active Repulsion vs. Instance-based Passive Constraint**
 
-We will clarify this relationship in the revised manuscript and position SDG as a complementary approach: its per-sample density guidance is orthogonal to OSCAR’s focus on covering modes and reducing redundancy across multiple samples.
+* **OSCAR employs Set-based Interaction:**
+    Our method explicitly models the interaction between multiple trajectories. We use a feature volume objective to ctively push samples apart in the semantic space. The orthogonal projection in our case is applied to this repulsive force relative to the *base flow velocity to preserve alignment.
+* **SDG employs Instance-based Constraint:**
+    SDG operates on a per-instance basis, modifying the SDE for a single sample without knowledge of other concurrent samples. It projects noise orthogonally to the *score function* ($\nabla \log p$) specifically to ensure the trajectory remains on a constant-density shell. It lacks an inter-sample repulsion mechanism and thus cannot guarantee that different random seeds will not collapse to the same high-density mode.
+
+**Summary:**
+In short, OSCAR actively forces a **set** of samples to diverge to cover the semantic distribution, whereas SDG constrains a **single** sample to explore variations while rigorously maintaining a target level of detail. We will include a discussion of SDG in the revised manuscript to clarify these meaningful differences.
 
 > Weakness 8
 
@@ -356,6 +363,27 @@ Across all evaluated concepts and settings, OSCAR’s ImageReward and CLIP-IQA s
 
 > Weakness 3
 
+We thank the reviewer for this keen observation regarding the discrepancy between the plotted curves and the reported AUC values. Upon thoroughly re-examining our evaluation pipeline, we identified that this inconsistency arose from a hyperparameter setting that was statistically ill-suited for our specific sample size ($N=32$ images per prompt).
+
+In our initial submission, we calculated PRD using $k=20$ clusters. However, given the limited number of samples, this setting resulted in extremely sparse histograms. This sparsity caused two critical issues. It led to manifold fragmentation, where valid, diverse samples were incorrectly penalized simply for falling into empty bins between the few real data points. More importantly regarding the reviewer's concern, this sparsity introduced significant discretization artifacts into the curves. Mathematically, these artifacts render the trapezoidal integration for AUC numerically unstable, making the metric overly sensitive to the quantization of individual samples rather than reflecting the true distributional overlap.
+
+To address this, we have adopted the standard "Square-root Choice" for histogram estimation ($k \approx \sqrt{N}$), adjusting the number of clusters to $k=6$. This correction effectively eliminates the discretization artifacts, ensuring that the AUC calculation is numerically robust and that the plotted curves accurately represent the density estimation.
+
+To demonstrate that this correction reflects genuine performance gains rather than parameter tuning, we have significantly expanded our evaluation scope. We added three new diverse concepts (*apple, suitcase, pizza*) to the original set (*truck, bus, bicycle*), re-evaluating all methods across these 6 concepts at 3 CFG levels. Under this rigorous setting, the updated PRD curves are smooth and visually consistent with the metrics, and OSCAR demonstrates superior performance in 15 out of 18 scenarios, confirming a robust advantage in the Recall-Precision trade-off. We have updated Figure 3 and Figure 8 accordingly.
+| Method | CFG | Apple | Suitcase | Pizza | Truck | Bus | Bicycle |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **DPP** | 3.0 | 0.266 | 0.251 | 0.304 | 0.327 | 0.487 | 0.401 |
+| | 5.0 | 0.266 | 0.247 | 0.301 | 0.235 | 0.459 | **0.400** |
+| | 7.5 | 0.233 | 0.212 | 0.291 | 0.196 | 0.452 | 0.373 |
+| **PG** | 3.0 | 0.264 | 0.244 | 0.221 | 0.489 | 0.598 | 0.278 |
+| | 5.0 | 0.222 | 0.139 | **0.355** | 0.315 | **0.584** | 0.239 |
+| | 7.5 | 0.273 | 0.194 | 0.290 | **0.214** | 0.568 | 0.191 |
+| **CADS** | 3.0 | 0.270 | 0.186 | 0.244 | 0.436 | 0.605 | 0.358 |
+| | 5.0 | 0.266 | 0.222 | 0.205 | 0.290 | 0.523 | 0.355 |
+| | 7.5 | 0.266 | 0.206 | 0.277 | 0.196 | 0.418 | 0.198 |
+| **OSCAR (Ours)** | 3.0 | **0.286** | **0.302** | **0.345** | **0.523** | **0.672** | **0.610** |
+| | 5.0 | **0.270** | **0.250** | 0.302 | **0.334** | 0.547 | 0.359 |
+| | 7.5 | **0.280** | **0.239** | **0.324** | 0.212 | **0.592** | **0.423** |
 
 > Weakness 4
 

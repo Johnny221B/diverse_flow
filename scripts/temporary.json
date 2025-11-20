@@ -1,11 +1,11 @@
 {
-    "siutcase": [
-        "a photo of a suitcase"
+    "truck": [
+        "a photo of a truck"
     ],
-    "pizza": [
-        "a photo of a pizza"
+    "bus": [
+        "a photo of a bus"
     ],
-    "apple": [
-        "a photo of a apple"
+    "bicycle": [
+        "a photo of a bicycle"
     ]
 }

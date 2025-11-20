@@ -10,7 +10,7 @@
    In the revised manuscript, Table 1 now includes a “FM-SD3.5 (N particles)” baseline that generates \(N\) independent samples from the same Stable Diffusion 3.5 flow-matching model used by OSCAR, with identical NFE, prompts, and model settings. This isolates the effect of our orthogonal stochastic control from simply increasing the number of samples drawn from the base model.
 
 2. **Compute-matched comparison.**  
-   We further include a compute-matched study in Appendix Table A.x, where we compare OSCAR to two strengthened FM-SD3.5 variants under approximately matched FLOPs: (i) increasing the number of particles, and (ii) increasing the NFE. The results are summarized below:
+   We further include a compute-matched study in Appendix E Table 13, where we compare OSCAR to two strengthened FM-SD3.5 variants under approximately matched FLOPs: (i) increasing the number of particles, and (ii) increasing the NFE. The results are summarized below:
 
    | Method        | NFE | Particles | FLOPs (T/run) | CLIP ↑           | Vendi (Pixel) ↑   | FID ↓             | BRISQUE ↓         |
    |--------------|-----|-----------|---------------|------------------|-------------------|-------------------|-------------------|

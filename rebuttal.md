@@ -33,7 +33,7 @@ Regarding the visual comparison for the ablation study, we fully agree that show
 - We respectfully clarify that the degradation observed in Section 5.2 does **not** imply parameter sensitivity, but rather demonstrates the **necessity of the gate mechanism**.
 
 - * **Section 5.2 :** This ablation compared a standard gate against the **extreme case** of full-trajectory noise ($t_{\text{gate}} = 1.0$). The substantial performance degradation here simply confirms that *some* gate is required to ensure convergence.
-- * **Appendix F :** To demonstrate robustness, we swept $t_{\text{gate}}$ across a wide reasonable range in **Appendix F 4.1 (Table 17)**. The results show that within this broad operational range, performance is highly stable and does not degrade, proving that the method is **not sensitive** to the precise value of $t_{\text{gate}}$.
+- * **Appendix F :** To demonstrate robustness, we swept $t_{\text{gate}}$ across a wide reasonable range in **Appendix F 4.1 (Table 18)**. The results show that within this broad operational range, performance is highly stable and does not degrade, proving that the method is **not sensitive** to the precise value of $t_{\text{gate}}$.
 
 Regarding Fig. 15, the confusion partly comes from an earlier **convention switch** between DDPM-style and flow-matching time parameterization: DDPM and flow matching define $x_0$ / $x_T$ in opposite ways. We initially followed the DDPM convention ($x_0$ = clean image) but finalized on the flow-matching convention ($x_0$ = noise). The current Fig. 15 caption still reflects the earlier wording. We have corrected this caption and the related notation in the revised version.
 
@@ -393,7 +393,7 @@ To address the request for "expected diversity over random class subsets" and fu
 *  We randomly selected 3 distinct concepts from COCO: **"Apple"**, **"Pizza"**, and **"Suitcase"**. We evaluated them using the same prompt. OSCAR consistently outperforms the strongest baseline in diversity metrics.
 
 * **Prompt-level Variance:** We have also included a detailed **Prompt-level analysis**. This reports the mean and variance of diversity metrics for individual prompts within the "truck" concept, confirming that our gains are statistically significant and not driven by outliers. 
-* All results have been shown in Appendix C.
+* All results have been shown in Appendix D.
 
 
 > Question 1 – Wall-clock inference time, FLOPs, and role of Heun

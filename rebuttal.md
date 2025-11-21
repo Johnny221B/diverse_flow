@@ -200,7 +200,7 @@ Under the same NFE, CFG, and particle count, OSCAR introduces only a **moderate 
 
 We agree that some differences in Table 1 look small compared to the reported standard deviations. This is mainly because each concept is averaged over multiple prompts (e.g., “a truck”, “a photo of a truck”), and different prompts within the same concept can induce very different metric values. As a result, the standard deviation in Table 1 is dominated by across-prompt variability, rather than by seed noise for a fixed prompt.
 
-Therefore, we clarify this by reporting per-prompt results for two representative prompts under the “truck’’ concept in Appendix C. These tables show that, for each fixed prompt and CFG level, OSCAR consistently improves the diversity metrics (Vendi Pixel / Vendi Inception / \(1-\)MS-SSIM) over the baselines, while quality metrics (FID, CLIP Score, BRISQUE) stay comparable and do not show systematic degradation. 
+Therefore, we clarify this by reporting per-prompt results for two representative prompts under the “truck’’ concept in Appendix D. These tables show that, for each fixed prompt and CFG level, OSCAR consistently improves the diversity metrics (Vendi Pixel / Vendi Inception / \(1-\)MS-SSIM) over the baselines, while quality metrics (FID, CLIP Score, BRISQUE) stay comparable and do not show systematic degradation. 
 
 To further strengthen this claim, we additionally evaluate three new concepts (apple, pizza, suitcase) using a **single** prompt per concept. Even in this stricter setting, OSCAR again improves all diversity metrics over the baselines, without noticeable degradation in FID, CLIP Score, or BRISQUE. Taken together, these prompt-level and concept-level results indicate that diversity gains are consistent across prompts and concepts, whereas the quality metrics serve primarily as a sanity check rather than the main target of statistically significant improvement.
 
@@ -363,7 +363,7 @@ In our initial submission, we calculated PRD using $k=20$ clusters. However, giv
 
 To address this, we have adopted the standard "Square-root Choice" for histogram estimation ($k \approx \sqrt{N}$), adjusting the number of clusters to $k=6$. This correction effectively eliminates the discretization artifacts, ensuring that the AUC calculation is numerically robust and that the plotted curves accurately represent the density estimation.
 
-To demonstrate that this correction reflects genuine performance gains rather than parameter tuning, we have significantly expanded our evaluation scope. We added three new diverse concepts (*apple, suitcase, pizza*) to the original set (*truck, bus, bicycle*), re-evaluating all methods across these 6 concepts at 3 CFG levels. Under this rigorous setting, the updated PRD curves are smooth and visually consistent with the metrics, and OSCAR demonstrates better performance in 14 out of 18 scenarios, confirming a robust advantage in the Recall-Precision trade-off. We have updated Figure 3 and Figure 8 accordingly. Also we add results in Appendix C.
+To demonstrate that this correction reflects genuine performance gains rather than parameter tuning, we have significantly expanded our evaluation scope. We added three new diverse concepts (*apple, suitcase, pizza*) to the original set (*truck, bus, bicycle*), re-evaluating all methods across these 6 concepts at 3 CFG levels. Under this rigorous setting, the updated PRD curves are smooth and visually consistent with the metrics, and OSCAR demonstrates better performance in 14 out of 18 scenarios, confirming a robust advantage in the Recall-Precision trade-off. We have updated Figure 3 and Figure 8 accordingly. Also we add results in Appendix D.
 | Method | CFG | Apple | Suitcase | Pizza | Truck | Bus | Bicycle |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **DPP** | 3.0 | 0.266 | 0.251 | 0.304 | 0.327 | 0.487 | 0.401 |
@@ -393,7 +393,7 @@ To address the request for "expected diversity over random class subsets" and fu
 *  We randomly selected 3 distinct concepts from COCO: **"Apple"**, **"Pizza"**, and **"Suitcase"**. We evaluated them using the same prompt. OSCAR consistently outperforms the strongest baseline in diversity metrics.
 
 * **Prompt-level Variance:** We have also included a detailed **Prompt-level analysis**. This reports the mean and variance of diversity metrics for individual prompts within the "truck" concept, confirming that our gains are statistically significant and not driven by outliers. 
-* All results have been shown in C.
+* All results have been shown in Appendix C.
 
 
 > Question 1 – Wall-clock inference time, FLOPs, and role of Heun

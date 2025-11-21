@@ -87,24 +87,21 @@ We have moved the original experiment with $N=2000$ to Appendix E.1 . We added a
 
 > Weakness 3 – Equation (3) and the notion of “volume”
 
-**(i) Why Eq. (3) represents a volume notion.**  
-Given a set of feature vectors with empirical covariance $\Sigma$, classical results from multivariate analysis tell us that the ellipsoid
-\[
-E = \{x \,:\, x^\top \Sigma^{-1} x \le 1\}
-\]
-has volume $\mathrm{Vol}(E) = C_d \cdot (\det \Sigma)^{1/2}$, where $C_d$ depends only on the dimension $d$. Thus, the quantity $\log \det \Sigma$ (up to an additive constant) is a standard surrogate for the **log-volume** occupied by the sample cloud in feature space. Our Eq. (3) is exactly a **smoothed log-volume** of this form: in the limit $\tau \to 0$ and $\varepsilon \to 0$, it reduces to the log-determinant of a covariance-like matrix, whose exponential is proportional to the volume of the associated covariance ellipsoid. In the revision we will make this geometric interpretation explicit in the main text and add a short citation to standard treatments of covariance ellipsoids in multivariate analysis.
+We clarify the geometric interpretation of Eq. (3) and the specific roles of the hyperparameters $\tau$ and $\epsilon$, correcting any ambiguity about their function.
 
-**(ii) Role of the hyperparameters $\tau$ and $\varepsilon$.**  
-As discussed in the “Hyperparameters Setup” paragraph of the appendix, $\tau$ and $\varepsilon$ are introduced purely for **numerical stability**, not to change the semantics of the objective:
+**(i) Why Eq. (3) represents a volume notion.**
+Geometrically, the determinant of the Gram matrix $G = ZZ^\top$ represents the squared volume of the parallelotope spanned by the feature vectors $\{z_i\}$. Maximizing $\det(ZZ^\top)$ directly forces the vectors to be orthogonal [1].
+However, in high-dimensional feature spaces, $ZZ^\top$ can be rank-deficient or ill-conditioned. Our objective, $\mathcal{E}_s(Z) = -\frac{1}{2}\log\det(I + \tau ZZ^\top + \epsilon_{tr}I)$, is a **regularized volume**.
+* The identity matrix $I$ acts as a ridge regularization, ensuring the matrix is always positive definite and the log-determinant is well-defined, even when the vectors are linearly dependent or collapse to a point.
+* This form is closely related to the **information theoretic** objective of maximizing the entropy of a Gaussian distribution with covariance $K = \tau ZZ^\top + I$. Maximizing this log-det is equivalent to maximizing the "information volume" spanned by the samples relative to the background noise level defined by $I$.
 
-- $\tau > 0$ is a very small regularization term that keeps the covariance-like matrix well-conditioned and ensures that the gradient of the objective remains well-defined and non-vanishing even when several particles nearly coincide in feature space.
-- $\varepsilon > 0$ is a tiny offset inside the logarithm, used only to prevent taking $\log 0$ or $\log$ of negative/near-zero quantities, thereby guaranteeing that the computed “volume” is non-negative and finite.
+**(ii) Role of the hyperparameters $\tau$ and $\epsilon_{tr}$.**
+- **$\tau$ :** This is a scaling factor that controls the strength of the repulsion. In our experiments, we set $\tau=1$. This scales the signal $ZZ^\top$ relative to the identity baseline $I$, ensuring that the gradients are well-scaled for optimization. 
+- **$\epsilon_{tr}$ :** This is a tiny, data-dependent regularizer ($\propto \text{tr}(ZZ^\top)$) added solely to prevent numerical instability in floating-point computations during matrix inversion or Cholesky decomposition. Unlike $\tau$, this term is indeed a technical safeguard.
 
-Both $\tau$ and $\varepsilon$ are fixed to **very small constants** and are not tuned per experiment. In all practical settings they only become active in degenerate configurations where the empirical covariance is almost singular; in the non-degenerate regime they do not alter the ordering of configurations induced by the volume objective and thus do not affect the reported results.
+We will update the manuscript to explicitly cite the connection to Gram determinants and regularized volume maximization, and clarify that $\tau=1$ is a structural parameter for scaling the interaction.
 
-We will clarify these points in the revised manuscript so that Eq. (3) is clearly understood as a standard, smoothed log-volume objective, and $\tau,\varepsilon$ are seen as technical stabilizers rather than substantive modeling hyperparameters.
-
-
+[1] Kulesza, A., & Taskar, B. (2012). Determinantal point processes for machine learning.
 
 > Weakness 4 – Explanation of Eq. (4)
 
@@ -129,18 +126,19 @@ In practice, we compute this pullback efficiently using **two reverse-mode vecto
 
 We thank the reviewer for this insightful comment. We acknowledge that **"Stochastic Control"** is a specific mathematical field often associated with minimizing expected cost functionals via tools like the HJB equation.
 
-Our original choice of the term **"Stochastic Control"** was intended to structurally describe the two core components of our proposed SDE in Eq. 1:
+Our original choice of the term "Stochastic Control" was intended to structurally describe the two core components of our proposed SDE in Eq. 1:
+
 
 1.  **"Stochastic":** Refers to the injection of the noise term ($\sqrt{\beta(t)}dW_{t}$), which reintroduces randomness into the sampling process to enable exploration.
-2.  **"Control":** Refers to the deterministic guidance signal ($g(x,t)$). We specifically designed this term based on maximizing the **feature-space volume**. This term acts as an active force that **controls** and steers the particle trajectories outward to cover diverse modes, preventing them from collapsing into a single high-density region.
+2.  **"Control":** Refers to the deterministic guidance signal ($g(x,t)$). We specifically designed this term based on maximizing the **feature-space volume**. This term acts as an active force that controls and steers the particle trajectories outward to cover diverse modes, preventing them from collapsing into a single high-density region.
 
 In the broader context of generative modeling and dynamical systems, applying an external force to influence system behavior is widely referred to as "control." Therefore, we believe the name effectively communicates the method's function: using stochasticity and deterministic guidance to control the flow.
 
-However, we agree that avoiding terminological collision with the established field of Optimal Stochastic Control is desirable. To resolve this ambiguity while preserving the acronym **OSCAR**, we propose revising the full name in the final manuscript to:
+However, we agree that avoiding terminological collision with the established field of Optimal Stochastic Control is desirable. To resolve this ambiguity while preserving the acronym OSCAR, we propose revising the full name in the final manuscript to:
 
 **"Orthogonal Stochastic Correction for Alignment-Respecting Diversity..."**
 
-The term **"Correction"** accurately captures our method's nature: we apply a deterministic correction and a stochastic correction to the base flow to achieve diversity. We believe this modification maintains the accuracy of our description while satisfying the reviewer's concern.
+The term **"Correction"** accurately captures our method's nature: we apply a deterministic correction and a stochastic correction to the base flow to achieve diversity. If the reviewer has alternative suggestions for phrasing or additional analyses, we would be very happy to consider and incorporate them.
 
 > Weakness 6 – Readability of Appendix B
 
@@ -172,24 +170,21 @@ We outline the key distinctions below:
 * **SDG employs Instance-based Constraint:**
     SDG operates on a per-instance basis, modifying the SDE for a single sample without knowledge of other concurrent samples. It projects noise orthogonally to the *score function* ($\nabla \log p$) specifically to ensure the trajectory remains on a constant-density shell. It lacks an inter-sample repulsion mechanism and thus cannot guarantee that different random seeds will not collapse to the same high-density mode.
 
-**Summary:**
 In short, OSCAR actively forces a **set** of samples to diverge to cover the semantic distribution, whereas SDG constrains a **single** sample to explore variations while rigorously maintaining a target level of detail. We will include a discussion of SDG in the revised manuscript to clarify these meaningful differences.
 
 > Weakness 8 theoretically guarantee in sampling
 
-We have significantly strengthened the theoretical analysis in the revised manuscript by providing a **dual characterization** of our method:
+We have significantly strengthened the theoretical analysis in the revised manuscript by providing a dual characterization of our method:
 
 1.  To address the reviewer's request to "characterize the distribution," we added the Girsanov Theorem derivation. This explicitly defines the OSCAR sampling distribution as a reweighted measure of the baseline, mathematically legitimizing the method beyond a heuristic (See in Appendix B Theorem 4).
 
 2.  Complementing the probabilistic view, we retain our coupling-based bounds. The theorem specifically utilizes the properties of our **orthogonal projection** to prove that the generated samples remain geometrically close to the high-fidelity manifold (See in Appendix B Theorem 5).
 
-Together, these results prove that OSCAR is not only mathematically rigorous (Girsanov) but also geometrically stable and quality-preserving (Coupling Bounds).
-
 > Question 1
 
 
-1. **Practical runtime and memory comparison.**  
-   To quantify the actual overhead from Heun-based prediction and VJPs, we compare OSCAR with several diversity baselines under identical generation settings (NFE = 30, CFG = 5.0, batch size = 32). We report theoretical FLOPs, wall-clock time, and peak VRAM:
+**Practical runtime and memory comparison.**  
+To quantify the actual overhead from Heun-based prediction and VJPs, we compare OSCAR with several diversity baselines under identical generation settings (NFE = 30, CFG = 5.0, batch size = 32). We report theoretical FLOPs, wall-clock time, and peak VRAM:
 
    | Variant        | FLOPs (G) ↓ | Time (seconds/run) ↓ | Peak VRAM (GB) ↓ |
    |----------------|------------:|----------------------:|------------------:|
@@ -199,13 +194,16 @@ Together, these results prove that OSCAR is not only mathematically rigorous (Gi
    | PG             | 4093.4      | 229.6                 | 26.4             |
    | **OSCAR (ours)** | **5534.6**  | **451.4**             | **18.2**         |
 
-   Under the same NFE, CFG, and particle count, OSCAR introduces only a **moderate computational overhead** relative to the FM-SD3.5 baseline, while its peak VRAM is actually slightly **lower** than the baseline due to our memory-sharing implementation of the VJP. Crucially, this overhead is **much smaller than DPP**, which requires more than **2×** the FLOPs and over **4×** the runtime of the baseline under the same settings. These results empirically support our claim that OSCAR achieves strong diversity gains with substantially lower computational complexity than prior set-level diversity methods such as DPP, while maintaining memory usage comparable to standard FM sampling.
+Under the same NFE, CFG, and particle count, OSCAR introduces only a **moderate computational overhead** relative to the FM-SD3.5 baseline, while its peak VRAM is actually slightly **lower** than the baseline due to our memory-sharing implementation of the VJP. Crucially, this overhead is **much smaller than DPP**, which requires more than **2×** the FLOPs and over **4×** the runtime of the baseline under the same settings. These results empirically support our claim that OSCAR achieves strong diversity gains with substantially lower computational complexity than prior set-level diversity methods such as DPP, while maintaining memory usage comparable to standard FM sampling.
 
 > Question 2 – Statistical significance of Table 1
 
 We agree that some differences in Table 1 look small compared to the reported standard deviations. This is mainly because each concept is averaged over multiple prompts (e.g., “a truck”, “a photo of a truck”), and different prompts within the same concept can induce very different metric values. As a result, the standard deviation in Table 1 is dominated by across-prompt variability, rather than by seed noise for a fixed prompt.
 
-Therefore, we clarify this by reporting per-prompt results for two representative prompts under the “truck’’ concept in Appendix C. These tables show that, for each fixed prompt and CFG level, OSCAR consistently improves the diversity metrics (Vendi Pixel / Vendi Inception / 1−MS-SSIM) over the baselines, while quality metrics (FID, CLIP Score, Brisque) stay comparable and do not show systematic degradation. In addition, we run the same prompt-level evaluation on three other concepts using the same set of prompts and observe the same pattern: consistent gains in diversity metrics without noticeable quality loss. Our claim is therefore that diversity gains are consistent across prompts and concepts, and that the quality metrics are used as a sanity check (no significant quality loss), rather than as the main target of statistically significant improvement.
+Therefore, we clarify this by reporting per-prompt results for two representative prompts under the “truck’’ concept in Appendix C. These tables show that, for each fixed prompt and CFG level, OSCAR consistently improves the diversity metrics (Vendi Pixel / Vendi Inception / \(1-\)MS-SSIM) over the baselines, while quality metrics (FID, CLIP Score, BRISQUE) stay comparable and do not show systematic degradation. 
+
+To further strengthen this claim, we additionally evaluate three new concepts (apple, pizza, suitcase) using a **single** prompt per concept. Even in this stricter setting, OSCAR again improves all diversity metrics over the baselines, without noticeable degradation in FID, CLIP Score, or BRISQUE. Taken together, these prompt-level and concept-level results indicate that diversity gains are consistent across prompts and concepts, whereas the quality metrics serve primarily as a sanity check rather than the main target of statistically significant improvement.
+
 
 
 
@@ -249,8 +247,8 @@ These results indicate that OSCAR’s hyperparameters are largely consistent acr
 
 We agree that it is important to verify that OSCAR does not harm single-image fidelity on a broad, unbiased prompt distribution. To this end, we conducted an additional evaluation on **400 ImageNet-style prompts**, following the reviewer’s suggestion:
 
-- We randomly sample **400 classes** from ImageNet-256 and construct one text prompt per class.
-- For each prompt, we generate **a single image** and compute standard quality and alignment metrics over the resulting 400-image set.
+- We randomly sample 400 classes from ImageNet-256 and construct one text prompt per class.
+- For each prompt, we generate a single image and compute standard quality and alignment metrics over the resulting 400-image set.
 
 The results are summarized below:
 
@@ -262,7 +260,7 @@ The results are summarized below:
 | PG          | 99.7   | 3.66            | 34.34               | 18.13 ± 0.24         |
 | **OSCAR**   | **99.3** | **3.85**      | **36.40**           | **18.08 ± 0.24**     |
 
-OSCAR achieves the **best FID** and the best ImageReward and Vendi scores among all methods, indicating that our diversity-enhancing guidance does **not** introduce systematic quality degradation even when each prompt only produces a single image. The CLIPScore of OSCAR is statistically indistinguishable from the baselines, confirming that text–image alignment is preserved. Overall, this large-scale random-prompt evaluation supports that OSCAR maintains single-sample quality while providing stronger set-level diversity.
+OSCAR achieves the best FID and the best ImageReward and Vendi scores among all methods, indicating that our diversity-enhancing guidance does not introduce systematic quality degradation even when each prompt only produces a single image. The CLIPScore of OSCAR is statistically indistinguishable from the baselines, confirming that text–image alignment is preserved. Overall, this large-scale random-prompt evaluation supports that OSCAR maintains single-sample quality while providing stronger set-level diversity.
 
 > Weakness 2 – Feature-space dependence of the volume objective
 
@@ -281,26 +279,24 @@ We keep **CLIP** as our default encoder because it offers a mild but consistent 
 
 > Weakness 3 – Relation to high-order samplers (e.g., DPM-Solver++, UniPC)
 
-
-Conceptually, **high-order samplers** such as DPM-Solver++ and UniPC operate purely at the **numerical analysis level**. They take a *fixed* continuous-time generative ODE/SDE
-$$
+Conceptually, high-order samplers such as DPM-Solver++ and UniPC operate purely at the **numerical analysis level**: they take a *fixed* continuous-time generative ODE/SDE
+\[
 \mathrm{d}x_t = f_\theta(x_t, t)\,\mathrm{d}t
+\]
+and design higher-order schemes whose goal is to approximate these **original dynamics** as accurately as possible, i.e., to reduce integration error *without* changing the learned velocity field \(f_\theta\) or the target distribution.
+
+By contrast, OSCAR explicitly **modifies the dynamics themselves**. We add an orthogonal drift and noise,
 $$
-and design higher-order schemes whose goal is to approximate the same dynamics more accurately without changing the learned velocity field $f_\theta$.
-
-By contrast, OSCAR explicitly modifies the dynamics themselves. We add an orthogonal drift and noise,
+\mathrm{d}x_t = \bigl[f_\theta(x_t,t) + g_\perp(x_t,t)\bigr]\mathrm{d}t + \sigma(t)\,\Pi_\perp(x_t,t)\,\mathrm{d}W_t,
 $$
-\mathrm{d}x_t = \bigl[f_\theta(x_t,t) + g_\perp(x_t,t)\bigr]\mathrm{d}t + \sigma(t)\,\Pi_\perp(x_t,t)\,\mathrm{d}W_t.
-$$
-where $g_\perp$ and the projection $\Pi_\perp$ are constructed to spread particles laterally in feature space. This introduces a **controlled bias** relative to the original FM dynamics, trading exactness for improved set-level diversity and coverage.
+where \(g_\perp\) and the projection \(\Pi_\perp\) are constructed to spread particles laterally in feature space and increase set-level coverage. This introduces a **controlled bias** relative to the original FM dynamics: the sampler is no longer targeting the exact same distribution as the base model, but a nearby one that is deliberately shaped to reduce redundancy and improve diversity across samples.
 
-From a numerical perspective, however, there is **no conflict** between OSCAR and high-order samplers:
+In this sense, if the objective is *strictly* to obtain unbiased samples from the original flow-matching model, OSCAR and high-order solvers pursue **different, and partly conflicting, goals**: high-order samplers aim to *remove* integration bias, whereas OSCAR *introduces* a small, structured bias to trade exactness for better set-level diversity.
 
-- We can view OSCAR as defining a *new* controlled vector field $f_\theta^{\text{OSCAR}} = f_\theta + g_\perp$ and a modified noise covariance.
-- Any integrator—Euler, Heun, DPM-Solver++, UniPC—can then be applied to this modified ODE/SDE by simply plugging in $f_\theta^{\text{OSCAR}}$ and the projected noise.  
-- The order of accuracy of the solver (second, third, etc.) is preserved **with respect to the controlled dynamics**. Orthogonal control does not break the consistency of the solver; it only changes the target dynamics it is accurately integrating.
+From an implementation viewpoint, however, there is no technical incompatibility: one can view OSCAR as defining a new controlled vector field \(f_\theta^{\text{OSCAR}} = f_\theta + g_\perp\) and a modified noise covariance, and then apply any integrator to these modified dynamics. In that case, the high-order solver remains high-order with respect to the OSCAR-controlled dynamics, but the resulting samples no longer correspond to the original base flow.
 
-In other words, **OSCAR is complementary to high-order samplers**: the former changes the dynamics to encourage diversity, introducing a small, explicitly controlled bias, while the latter can still be used to integrate those dynamics with high accuracy and fewer steps. In this work we focus on a Heun-style integrator for simplicity and to keep the comparison with standard FM transparent. In the revised version we will add a short discussion making this relationship explicit, and we view combining OSCAR with DPM-Solver++/UniPC as a promising direction for future work.
+In this work we intentionally keep the sampler simple to make comparisons against the standard FM baseline as transparent as possible. A more systematic study of combining OSCAR-like control with advanced high-order solver, while explicitly acknowledging the induced bias, is an interesting direction for future work.
+
 
 
 **Best regards,**
@@ -405,7 +401,7 @@ To address the request for "expected diversity over random class subsets" and fu
 Thank you for raising this point and for catching a possible source of confusion about Heun.
 
 1. **Clarifying the role of “Heun” in OSCAR.**  
-   In our work, “Heun” refers to a **mathematical extrapolation scheme in feature space**, not to a separate pretrained model or a different sampler for the underlying FM backbone. Concretely, we use a Heun-style formula to predict the **final feature vector** from the current and initial feature vectors; this endpoint predictor is used only inside our diversity objective. All baselines and OSCAR share the **same FM backbone, the same NFE (30 steps), the same CFG (5.0), and the same particle count**. The extra Heun-based predictor in OSCAR reuses quantities already computed along the trajectory and adds only lightweight linear operations in feature space. It does not introduce additional neural network evaluations beyond those reflected in our FLOPs numbers, and it does not accelerate or change the base sampler dynamics for the baselines.
+   In our work, “Heun” refers to a **mathematical extrapolation scheme in feature space**, not to a separate pretrained model or a different sampler for the underlying FM backbone. Concretely, we use a Heun-style formula to predict the **final feature vector** from the current and initial feature vectors; this endpoint predictor is used only inside our diversity objective. All baselines and OSCAR share the same FM backbone, the same NFE (30 steps), the same CFG (5.0), and the same particle count. The extra Heun-based predictor in OSCAR reuses quantities already computed along the trajectory and adds only lightweight linear operations in feature space. It does not introduce additional neural network evaluations beyond those reflected in our FLOPs numbers, and it does not accelerate or change the base sampler dynamics for the baselines.
 
 2. **Measured computational cost.**  
    To quantify the actual overhead of OSCAR relative to the baselines, we measure total FLOPs, wall-clock time per set, and peak VRAM under identical generation settings (NFE = 30, CFG = 5.0, batch size = 32, 512×512 resolution) on an NVIDIA A6000 GPU:

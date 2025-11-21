@@ -48,20 +48,19 @@ Regarding Fig. 15, the confusion partly comes from an earlier **convention switc
 
 **Thank you for your thoughtful and encouraging review. We sincerely appreciate your positive assessment of our work and your recognition of its potential. Below, we address your specific comments in more detail:**
 
-> Weakness 1
+> Weakness 1 Response to Question regarding Figure 2 and True Distribution
 
 **Regarding Fig. 2 and the notion of “mode collapse”.**
 
 We agree that our wording was imprecise here, and we thank the reviewer for pointing this out.
 
-The target distribution in Fig. 2 is a **uniformly weighted $3\times3$ Gaussian mixture** with shared diagonal covariance. Concretely, we learn a flow from a standard Gaussian $p_0 = \mathcal{N}(0,I)$ to $ p_1 = \tfrac{1}{9}\sum_{k=1}^{9}\mathcal{N}(\mu_k,\sigma^2 I),$ where the black “+” markers in the plot indicate the component means $\{\mu_k\}$. The three columns show particle locations at early, middle, and final sampling steps under the **same step budget** for Standard FM and OSCAR.
+The target distribution in Fig. 2 is a **uniformly weighted $3\times3$ Gaussian mixture** with shared diagonal covariance. Concretely, we learn a flow from a standard Gaussian $p_0 = \mathcal{N}(0,I)$ to $ p_1 = \tfrac{1}{9}\sum_{k=1}^{9}\mathcal{N}(\mu_k,\sigma^2 I),$ where the black “+” markers in the plot indicate the component means $\{\mu_k\}$. The three columns show particle locations at early, middle, and final sampling steps under the **same step budget** for Standard FM and OSCAR. However, the original Figure 2 used a large number of particles (**N=2000**) with a strong diversity weight, which will cause two problems:
+* Our feature-volume control acts as a repulsive force. From a physics perspective, when a large number of repulsive particles are confined within a potential well, they tend to arrange themselves **uniformly** to minimize the system energy, creating the "square-like" uniform patches observed.
+* **Theoretical Interpretation:** As discussed in our theoretical analysis (Appendix B), OSCAR introduces a controlled bias to increase entropy. When $N$ is very large, the repulsive gradient accumulates, and if the guidance strength is not scaled down inversely with $N$, the method prioritizes **volume maximization**  over **density matching**. This effectively inflates the Gaussian modes into uniform distributions to maximize coverage.
 
-Both Standard FM and OSCAR correctly match the GMM at the final step; the purpose of the figure is **not** to claim that Standard FM suffers from permanent mode collapse, but rather to visualize differences in the **finite-step trajectories**. At intermediate steps, Standard FM tends to produce more clustered particles, with intra-mode under-dispersion and some inter-mode mixing, while OSCAR maintains distributional correctness and yields more uniform within-mode coverage and clearer separation between modes, corresponding to higher diversity under a fixed step budget.
+To demonstrate that OSCAR can respect the Gaussian structure while still improving diversity, we provide a revised experiment with **fewer particles (N=200)** in **Figure R1** (and updated in the manuscript). As shown in the new figure 2, OSCAR successfully maintains the Gaussian-like cluster shape while still exhibiting significantly **wider coverage** than Standard FM. This confirms that OSCAR effectively alleviates the over-concentration of FM without destroying the local distribution structure, provided the repulsion is balanced. 
 
-To avoid confusion, in the revised manuscript we will:
-- explicitly state the GMM definition and parameters in the Appendix, and  
-- replace the term “mode collapse” with a more accurate description such as **“transient under-dispersion/under-coverage of modes under a finite step budget.”**
-
+We have moved the original experiment with $N=2000$ to Appendix E.1 . We added a detailed discussion there to analyze this trade-off, explaining that while extremely high particle counts may prioritize support coverage over density matching, the method functions correctly as a diversity enhancer in standard regimes.
 
 > Weakness 2
 
@@ -146,7 +145,7 @@ The term **"Correction"** accurately captures our method's nature: we apply a de
 > Weakness 6 – Readability of Appendix B
 
 
-**Response.** We appreciate this comment and have substantially revised **Appendix B** to improve its readability. In the revised version, each result is clearly structured as:
+We appreciate this comment and have substantially revised **Appendix B** to improve its readability. In the revised version, each result is clearly structured as:
 
 - **Lemma/Theorem statement** (numbered and titled), followed by  
 - a separate, explicitly labeled **“Proof.”** block, and  
@@ -176,7 +175,15 @@ We outline the key distinctions below:
 **Summary:**
 In short, OSCAR actively forces a **set** of samples to diverge to cover the semantic distribution, whereas SDG constrains a **single** sample to explore variations while rigorously maintaining a target level of detail. We will include a discussion of SDG in the revised manuscript to clarify these meaningful differences.
 
-> Weakness 8
+> Weakness 8 theoretically guarantee in sampling
+
+We have significantly strengthened the theoretical analysis in the revised manuscript by providing a **dual characterization** of our method:
+
+1.  To address the reviewer's request to "characterize the distribution," we added the Girsanov Theorem derivation. This explicitly defines the OSCAR sampling distribution as a reweighted measure of the baseline, mathematically legitimizing the method beyond a heuristic (See in Appendix B Theorem 4).
+
+2.  Complementing the probabilistic view, we retain our coupling-based bounds. The theorem specifically utilizes the properties of our **orthogonal projection** to prove that the generated samples remain geometrically close to the high-fidelity manifold (See in Appendix B Theorem 5).
+
+Together, these results prove that OSCAR is not only mathematically rigorous (Girsanov) but also geometrically stable and quality-preserving (Coupling Bounds).
 
 > Question 1
 
@@ -198,7 +205,7 @@ In short, OSCAR actively forces a **set** of samples to diverge to cover the sem
 
 We agree that some differences in Table 1 look small compared to the reported standard deviations. This is mainly because each concept is averaged over multiple prompts (e.g., “a truck”, “a photo of a truck”), and different prompts within the same concept can induce very different metric values. As a result, the standard deviation in Table 1 is dominated by across-prompt variability, rather than by seed noise for a fixed prompt.
 
-Therefore, we clarify this by reporting per-prompt results for two representative prompts under the “truck’’ concept in Appendix B. These tables show that, for each fixed prompt and CFG level, OSCAR consistently improves the diversity metrics (Vendi Pixel / Vendi Inception / 1−MS-SSIM) over the baselines, while quality metrics (FID, CLIP Score, Brisque) stay comparable and do not show systematic degradation. In addition, we run the same prompt-level evaluation on three other concepts using the same set of prompts and observe the same pattern: consistent gains in diversity metrics without noticeable quality loss. Our claim is therefore that diversity gains are consistent across prompts and concepts, and that the quality metrics are used as a sanity check (no significant quality loss), rather than as the main target of statistically significant improvement.
+Therefore, we clarify this by reporting per-prompt results for two representative prompts under the “truck’’ concept in Appendix C. These tables show that, for each fixed prompt and CFG level, OSCAR consistently improves the diversity metrics (Vendi Pixel / Vendi Inception / 1−MS-SSIM) over the baselines, while quality metrics (FID, CLIP Score, Brisque) stay comparable and do not show systematic degradation. In addition, we run the same prompt-level evaluation on three other concepts using the same set of prompts and observe the same pattern: consistent gains in diversity metrics without noticeable quality loss. Our claim is therefore that diversity gains are consistent across prompts and concepts, and that the quality metrics are used as a sanity check (no significant quality loss), rather than as the main target of statistically significant improvement.
 
 
 
@@ -206,7 +213,7 @@ Therefore, we clarify this by reporting per-prompt results for two representativ
 
 > Question 3 – Are hyperparameters consistent across models?
 
-**Response.** To assess how portable our hyperparameters are, we applied OSCAR not only to FM-SD3.5, but also to two additional and very different text-to-image models: **SDXL-Turbo** and **SD1.5**. For each new backbone we first **directly reused** the hyperparameters tuned on FM-SD3.5 (“OSCAR (default params)”), and then performed a light model-specific tuning (“OSCAR (tuned params)”). All results are averaged over 6 seeds (mean ± 95% CI):
+To assess how portable our hyperparameters are, we applied OSCAR not only to FM-SD3.5, but also to two additional and very different text-to-image models: **SDXL-Turbo** and **SD1.5**. For each new backbone we first **directly reused** the hyperparameters tuned on FM-SD3.5 (“OSCAR (default params)”), and then performed a light model-specific tuning (“OSCAR (tuned params)”). All results are averaged over 6 seeds (mean ± 95% CI):
 
 | Model       | Variant                | CLIP ↑             | Vendi (Pixel) ↑    | Vendi (Inception) ↑ | FID ↓              | BRISQUE ↓          |
 |------------|------------------------|--------------------|--------------------|---------------------|--------------------|--------------------|
@@ -259,7 +266,7 @@ OSCAR achieves the **best FID** and the best ImageReward and Vendi scores among 
 
 > Weakness 2 – Feature-space dependence of the volume objective
 
-**Response.** We agree that it is important to verify that OSCAR does not depend critically on a single feature encoder. To this end, we replaced our default CLIP encoder with two widely used alternatives—**Inception** and **DINO**—while keeping all other components and hyperparameters unchanged. All variants use the full OSCAR framework and are evaluated over 6 seeds (mean ± 95% CI):
+We agree that it is important to verify that OSCAR does not depend critically on a single feature encoder. To this end, we replaced our default CLIP encoder with two widely used alternatives—**Inception** and **DINO**—while keeping all other components and hyperparameters unchanged. All variants use the full OSCAR framework and are evaluated over 6 seeds (mean ± 95% CI):
 
 | Encoder        | CLIP Score ↑       | Vendi (Pixel) ↑   | Vendi (Inception) ↑ | FID ↓              | BRISQUE ↓          |
 |----------------|--------------------|-------------------|---------------------|--------------------|--------------------|
@@ -308,7 +315,7 @@ In other words, **OSCAR is complementary to high-order samplers**: the former ch
 
 > Weakness 1 – Step-by-step ablation of OP and RR, and comparison to naïve setup
 
-**Response.** We agree that the previous ablation table was incomplete and could make the role of OP/RR hard to interpret. In the revision we provide a **full step-wise ablation**, starting from a naïve setup without either OP or RR and then adding them back one by one. Due to hardware changes, we re-ran all methods on the **“bowl”** concept with identical settings (FM-SD3.5 backbone, NFE=30, CFG=5.0, 6 seeds). The results are:
+We agree that the previous ablation table was incomplete and could make the role of OP/RR hard to interpret. In the revision we provide a **full step-wise ablation**, starting from a naïve setup without either OP or RR and then adding them back one by one. Due to hardware changes, we re-ran all methods on the **“bowl”** concept with identical settings (FM-SD3.5 backbone, NFE=30, CFG=5.0, 6 seeds). The results are:
 
 | Method        | CLIP Score ↑       | Vendi (Pixel) ↑   | Vendi (Inception) ↑ | FID ↓              | BRISQUE ↓          |
 |---------------|--------------------|-------------------|---------------------|--------------------|--------------------|
@@ -331,7 +338,7 @@ In other words, OP and RR are not cosmetic; they are **essential safeguards** th
 
 > Weakness 2 – Additional perceptual quality metrics
 
-**Response.** We agree that diversity improvements must be validated against perceptual quality. In the revised manuscript we therefore introduce two additional human-aligned quality metrics: **ImageReward** and **CLIP-IQA**. The corresponding results are reported below.
+We agree that diversity improvements must be validated against perceptual quality. In the revised manuscript we therefore introduce two additional human-aligned quality metrics: **ImageReward** and **CLIP-IQA**. The corresponding results are reported below.
 
 | Method    | CLIP-IQA ↑ (CFG=3.0) | CLIP-IQA ↑ (CFG=5.0) | CLIP-IQA ↑ (CFG=7.5) | Image Reward ↑ (CFG=3.0) | Image Reward ↑ (CFG=5.0) | Image Reward ↑ (CFG=7.5) |
 |-----------|----------------------|----------------------|----------------------|---------------------------|---------------------------|---------------------------|
@@ -360,7 +367,7 @@ In our initial submission, we calculated PRD using $k=20$ clusters. However, giv
 
 To address this, we have adopted the standard "Square-root Choice" for histogram estimation ($k \approx \sqrt{N}$), adjusting the number of clusters to $k=6$. This correction effectively eliminates the discretization artifacts, ensuring that the AUC calculation is numerically robust and that the plotted curves accurately represent the density estimation.
 
-To demonstrate that this correction reflects genuine performance gains rather than parameter tuning, we have significantly expanded our evaluation scope. We added three new diverse concepts (*apple, suitcase, pizza*) to the original set (*truck, bus, bicycle*), re-evaluating all methods across these 6 concepts at 3 CFG levels. Under this rigorous setting, the updated PRD curves are smooth and visually consistent with the metrics, and OSCAR demonstrates better performance in 14 out of 18 scenarios, confirming a robust advantage in the Recall-Precision trade-off. We have updated Figure 3 and Figure 8 accordingly. Also we add results in Appendix B.
+To demonstrate that this correction reflects genuine performance gains rather than parameter tuning, we have significantly expanded our evaluation scope. We added three new diverse concepts (*apple, suitcase, pizza*) to the original set (*truck, bus, bicycle*), re-evaluating all methods across these 6 concepts at 3 CFG levels. Under this rigorous setting, the updated PRD curves are smooth and visually consistent with the metrics, and OSCAR demonstrates better performance in 14 out of 18 scenarios, confirming a robust advantage in the Recall-Precision trade-off. We have updated Figure 3 and Figure 8 accordingly. Also we add results in Appendix C.
 | Method | CFG | Apple | Suitcase | Pizza | Truck | Bus | Bicycle |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **DPP** | 3.0 | 0.266 | 0.251 | 0.304 | 0.327 | 0.487 | 0.401 |
@@ -390,7 +397,7 @@ To address the request for "expected diversity over random class subsets" and fu
 *  We randomly selected 3 distinct concepts from COCO: **"Apple"**, **"Pizza"**, and **"Suitcase"**. We evaluated them using the same prompt. OSCAR consistently outperforms the strongest baseline in diversity metrics.
 
 * **Prompt-level Variance:** We have also included a detailed **Prompt-level analysis**. This reports the mean and variance of diversity metrics for individual prompts within the "truck" concept, confirming that our gains are statistically significant and not driven by outliers. 
-* All results have been shown in Appendix B.
+* All results have been shown in C.
 
 
 > Question 1 – Wall-clock inference time, FLOPs, and role of Heun

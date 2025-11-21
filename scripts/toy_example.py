@@ -307,7 +307,7 @@ for it in range(1800):
     opt.step()
 
 # 同一批初始点
-K_SAMPLES = 1200
+K_SAMPLES = 200
 z0 = torch.randn(K_SAMPLES, 2, device=device)
 ids = torch.multinomial(gmm.weights.to(device), K_SAMPLES, replacement=True)
 y_onehot = F.one_hot(ids, num_classes=gmm.K).float()
@@ -329,7 +329,7 @@ snap_fracs = (0.2, 0.6, 1.0)
 snap_indices = [min(int(f*STEPS), STEPS) for f in snap_fracs]
 
 # 2 行 × 3 列：第 1 行 Baseline；第 2 行 OSCAR
-out_dir = "/mnt/data6t/yyz/flow_grpo/flow_base/outputs/results"
+out_dir = "/data2/toby/OSCAR/outputs/results"
 os.makedirs(out_dir, exist_ok=True)
 fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(8, 5.5), constrained_layout=False)
 

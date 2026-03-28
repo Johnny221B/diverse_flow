@@ -6,7 +6,7 @@ set -e
 # --- 全局基础参数 ---
 G_VAL=32
 GUIDANCE=5.0
-STEPS=40      # 提升至 50 步，确保面部细节和服饰纹理完美
+STEPS=30      # 提升至 50 步，确保面部细节和服饰纹理完美
 MODEL_DIR="./models/stable-diffusion-3.5-medium"
 SPEC="specs/t2i_human_mini.json"
 CARD_ID=0     # 你指定的显卡 ID

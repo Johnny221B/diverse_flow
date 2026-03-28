@@ -1,0 +1,31 @@
+prompt_key,prompt_folder,prompt_text,our_value,avg_other,gap_to_avg_other,vendi_inception__base,vendi_inception__ourmethod,vendi_inception__cads,vendi_inception__pg,vendi_inception__dpp,vendi_inception__mix,vendi_inception__apg
+a_computer_on_the_left_of_a_pig,a_computer_on_the_left_of_a_pig,a computer on the left of a pig,1.5976,1.8728333333333333,0.27523333333333344,1.7656,1.5976,1.8452,1.9402,1.9494,1.9515,1.7851
+a_green_bench_and_a_brown_dog,a_green_bench_and_a_brown_dog,a green bench and a brown dog,1.8477,2.0686833333333334,0.22098333333333353,2.1257,1.8477,2.0153,2.0383,2.1837,1.9212,2.1279
+the_silver_laptop_was_on_top_of_the_black_desk,The_silver_laptop_was_on_top_of_the_black_desk,The silver laptop was on top of the black desk,1.7412,1.9447,0.20350000000000001,1.8713,1.7412,1.9983,1.9644,2.0922,1.8739,1.8681
+a_fish_on_the_left_of_a_microwave,a_fish_on_the_left_of_a_microwave,a fish on the left of a microwave,1.6421,1.8121166666666664,0.17001666666666648,1.5621,1.6421,1.5693,1.614,2.5726,1.9782,1.5765
+the_black_phone_was_resting_on_the_brown_charger,The_black_phone_was_resting_on_the_brown_charger,The black phone was resting on the brown charger,1.8185,1.98555,0.16704999999999992,1.8942,1.8185,1.9979,1.9146,2.0997,2.099,1.9079
+a_computer_on_the_bottom_of_a_horse,a_computer_on_the_bottom_of_a_horse,a computer on the bottom of a horse,2.0423,2.202683333333333,0.16038333333333288,2.216,2.0423,2.2171,2.2126,2.2045,2.1506,2.2153
+a_sheep_on_the_top_of_a_backpack,a_sheep_on_the_top_of_a_backpack,a sheep on the top of a backpack,1.7572,1.9098499999999998,0.15264999999999973,1.9396,1.7572,1.8272,1.8313,1.9601,1.9587,1.9422
+a_bowl_on_the_right_of_a_chicken,a_bowl_on_the_right_of_a_chicken,a bowl on the right of a chicken,1.75,1.8864500000000002,0.13645000000000018,1.824,1.75,1.8539,1.7874,2.0466,1.9861,1.8207
+a_cow_near_a_balloon,a_cow_near_a_balloon,a cow near a balloon,1.6607,1.7915833333333333,0.13088333333333324,1.8218,1.6607,1.644,1.8244,1.7366,1.9147,1.808
+a_red_car_and_a_gold_clock,a_red_car_and_a_gold_clock,a red car and a gold clock,1.8293,1.9553333333333336,0.12603333333333366,1.9236,1.8293,1.9547,2.0229,2.1382,1.801,1.8916
+a_fish_on_the_top_of_a_bowl,a_fish_on_the_top_of_a_bowl,a fish on the top of a bowl,1.9551,2.0788500000000005,0.12375000000000047,2.1615,1.9551,2.1765,2.1716,1.5708,2.2343,2.1584
+a_green_bench_and_a_yellow_dog,a_green_bench_and_a_yellow_dog,a green bench and a yellow dog,1.8259,1.9470666666666665,0.12116666666666642,1.9074,1.8259,2.0082,1.9561,1.9348,1.9592,1.9167
+a_brown_car_and_a_red_elephant,a_brown_car_and_a_red_elephant,a brown car and a red elephant,2.0863,2.20345,0.11715000000000009,2.1587,2.0863,2.147,2.1001,2.4656,2.2046,2.1447
+a_green_bench_and_a_red_car,a_green_bench_and_a_red_car,a green bench and a red car,1.993,2.1049,0.11190000000000011,2.1301,1.993,2.0801,2.056,2.1873,2.0461,2.1298
+the_red_apple_was_on_top_of_the_white_plate,The_red_apple_was_on_top_of_the_white_plate,The red apple was on top of the white plate,1.3366,1.440216666666667,0.10361666666666691,1.3726,1.3366,1.5053,1.3847,1.5649,1.4418,1.372
+the_red_umbrella_was_on_top_of_the_white_coat_rack,The_red_umbrella_was_on_top_of_the_white_coat_rack,The red umbrella was on top of the white coat rack,1.7378,1.8381333333333334,0.10033333333333339,1.874,1.7378,1.9128,1.9026,1.642,1.8508,1.8466
+a_girl_on_the_left_of_a_frog,a_girl_on_the_left_of_a_frog,a girl on the left of a frog,1.8484,1.9449166666666668,0.0965166666666668,1.8605,1.8484,2.0507,1.9058,1.7947,2.1487,1.9091
+a_phone_on_the_left_of_a_boy,a_phone_on_the_left_of_a_boy,a phone on the left of a boy,2.1957,2.29015,0.09445000000000014,2.3834,2.1957,2.2785,2.3569,2.2891,2.0305,2.4025
+a_bag_on_the_bottom_of_a_chicken,a_bag_on_the_bottom_of_a_chicken,a bag on the bottom of a chicken,2.0696,2.157933333333333,0.08833333333333293,2.0755,2.0696,2.1518,2.0894,2.3233,2.2314,2.0762
+a_dog_on_the_top_of_a_suitcase,a_dog_on_the_top_of_a_suitcase,a dog on the top of a suitcase,1.9861,2.0738333333333334,0.08773333333333344,2.0722,1.9861,1.9865,2.0833,2.0951,2.1294,2.0765
+a_computer_on_the_top_of_a_sheep,a_computer_on_the_top_of_a_sheep,a computer on the top of a sheep,1.7442,1.8297666666666668,0.08556666666666679,1.7265,1.7442,1.8644,1.775,2.0075,1.883,1.7222
+a_red_car_and_a_brown_clock,a_red_car_and_a_brown_clock,a red car and a brown clock,1.9156,1.992,0.07640000000000002,1.9576,1.9156,2.001,1.9443,2.0755,1.9739,1.9997
+a_turtle_on_the_left_of_a_painting,a_turtle_on_the_left_of_a_painting,a turtle on the left of a painting,1.4959,1.5717333333333332,0.0758333333333332,1.4508,1.4959,1.4631,1.4293,1.7167,1.9241,1.4464
+the_wooden_spoon_was_next_to_the_green_bowl,The_wooden_spoon_was_next_to_the_green_bowl,The wooden spoon was next to the green bowl,1.7823,1.8579999999999997,0.07569999999999966,1.8777,1.7823,1.7993,1.7722,1.8465,2.0099,1.8424
+a_person_on_the_left_of_a_microwave,a_person_on_the_left_of_a_microwave,a person on the left of a microwave,1.5429,1.6180833333333335,0.0751833333333336,1.5591,1.5429,1.6591,1.5403,1.7216,1.6715,1.5569
+a_green_bench_and_a_blue_car,a_green_bench_and_a_blue_car,a green bench and a blue car,2.0103,2.082383333333333,0.07208333333333306,2.1892,2.0103,2.2248,2.1175,1.9874,1.8093,2.1661
+the_black_chair_was_next_to_the_silver_table,The_black_chair_was_next_to_the_silver_table,The black chair was next to the silver table,1.7589,1.829,0.07010000000000005,1.8019,1.7589,1.729,1.7184,2.0505,1.8952,1.779
+a_pig_on_side_of_a_wallet,a_pig_on_side_of_a_wallet,a pig on side of a wallet,1.6657,1.73285,0.06715000000000004,1.6557,1.6657,1.6701,1.7699,1.5987,2.0002,1.7025
+the_green_plant_was_on_the_right_the_white_wall,The_green_plant_was_on_the_right_the_white_wall,The green plant was on the right the white wall,2.2057,2.2722,0.0665,2.2566,2.2057,2.2471,2.4096,2.4417,2.0601,2.2181
+the_red_mug_was_on_top_of_the_green_coaster,The_red_mug_was_on_top_of_the_green_coaster,The red mug was on top of the green coaster,1.5621,1.6093333333333335,0.04723333333333346,1.5849,1.5621,1.587,1.5497,1.7512,1.6039,1.5793

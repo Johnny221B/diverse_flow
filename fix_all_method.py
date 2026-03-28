@@ -171,14 +171,16 @@ def make_method_grid_auto(
 
 ref_path = "/data2/toby/OSCAR/outputs/ourmethod_t2i_spatial/imgs/a_bicycle_on_the_left_of_a_bird/000.png"
 
-methods = ["ourmethod", "pg", "cads", "dpp", "base"]
+methods = ["ourmethod", "pg", "cads", "dpp", "base", "mix", "apg"]
 
 method_to_indices = {
     "ourmethod": ["000", "001", "004", "005", "010", "013", "012", "008"],
     "pg": ["001", "002", "003", "013", "004", "014", "007", "011"],
     "cads": ["001", "002", "003", "010", "005", "014", "007", "011"],
     "dpp": ["001", "002", "006", "010", "005", "014", "007", "008"],
-    "base": ["001", "002", "003", "010", "011", "014", "007", "015"]
+    "base": ["001", "002", "003", "010", "011", "014", "007", "015"],
+    "mix": ["001", "002", "003", "010", "011", "014", "007", "015"],
+    "apg": ["001", "002", "003", "010", "011", "014", "007", "015"],
 }
 
 canvas, png_path, pdf_path = make_method_grid_auto(

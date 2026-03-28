@@ -117,13 +117,13 @@ def plot_metrics_per_prompt(
 
 if __name__ == "__main__":
     methods = ["base", "ourmethod", "cads", "pg", "dpp", "mix", "apg"]
-    category = "t2i_complex"
+    category = "t2i_small"
 
     avg_df = plot_metrics_per_prompt(
         methods=methods,
         category=category,
-        save_path=f"/data2/toby/OSCAR/outputs/compare_{category}.png",
-        avg_save_path=f"/data2/toby/OSCAR/outputs/compare_{category}_average.csv",
+        save_path=f"/data2/toby/OSCAR/outputs/results/{category}.png",
+        avg_save_path=f"/data2/toby/OSCAR/outputs/results/{category}_average.csv",
         sort_x=False,
     )
 

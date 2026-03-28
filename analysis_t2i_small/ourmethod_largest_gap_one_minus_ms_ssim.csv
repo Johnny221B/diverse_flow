@@ -1,0 +1,31 @@
+prompt_key,prompt_folder,prompt_text,our_value,best_value,best_method,gap_to_best,one_minus_ms_ssim__base,one_minus_ms_ssim__ourmethod,one_minus_ms_ssim__cads,one_minus_ms_ssim__pg,one_minus_ms_ssim__dpp,one_minus_ms_ssim__mix,one_minus_ms_ssim__apg
+the_green_plant_was_on_the_right_the_white_wall,The_green_plant_was_on_the_right_the_white_wall,The green plant was on the right the white wall,0.6084,0.8227,dpp,0.21429999999999993,0.6876,0.6084,0.6932,0.6806,0.8227,0.7363,0.6878
+a_bee_on_the_top_of_a_airplane,a_bee_on_the_top_of_a_airplane,a bee on the top of a airplane,0.5292,0.7418,dpp,0.2126,0.5411,0.5292,0.5566,0.4779,0.7418,0.6153,0.5408
+the_red_mug_was_on_top_of_the_green_coaster,The_red_mug_was_on_top_of_the_green_coaster,The red mug was on top of the green coaster,0.6729,0.8452,dpp,0.1722999999999999,0.6696,0.6729,0.6744,0.64,0.8452,0.7742,0.6699
+a_computer_on_the_top_of_a_sheep,a_computer_on_the_top_of_a_sheep,a computer on the top of a sheep,0.767,0.9295,dpp,0.16249999999999998,0.7374,0.767,0.7349,0.6944,0.9295,0.8688,0.7378
+the_green_plant_was_on_top_of_the_brown_nightstand,The_green_plant_was_on_top_of_the_brown_nightstand,The green plant was on top of the brown nightstand,0.7376,0.8823,mix,0.14469999999999994,0.6869,0.7376,0.6962,0.6313,0.6155,0.8823,0.6872
+a_bicycle_on_the_left_of_a_bird,a_bicycle_on_the_left_of_a_bird,a bicycle on the left of a bird,0.794,0.9377,mix,0.14369999999999994,0.6945,0.794,0.6981,0.6468,0.6832,0.9377,0.6945
+the_black_phone_was_resting_on_the_brown_charger,The_black_phone_was_resting_on_the_brown_charger,The black phone was resting on the brown charger,0.6786,0.8126,mix,0.134,0.689,0.6786,0.6576,0.6671,0.748,0.8126,0.688
+a_boy_on_the_top_of_a_bag,a_boy_on_the_top_of_a_bag,a boy on the top of a bag,0.6584,0.7913,mix,0.13290000000000002,0.6528,0.6584,0.6437,0.5887,0.5798,0.7913,0.6537
+a_cow_near_a_balloon,a_cow_near_a_balloon,a cow near a balloon,0.7863,0.9054,mix,0.11909999999999998,0.7461,0.7863,0.7443,0.7027,0.7436,0.9054,0.7447
+a_giraffe_on_the_top_of_a_man,a_giraffe_on_the_top_of_a_man,a giraffe on the top of a man,0.6085,0.7207,mix,0.11219999999999997,0.6976,0.6085,0.6369,0.6888,0.6187,0.7207,0.6979
+the_red_apple_was_on_top_of_the_black_plate,The_red_apple_was_on_top_of_the_black_plate,The red apple was on top of the black plate,0.6939,0.8018,dpp,0.1079,0.668,0.6939,0.6699,0.6424,0.8018,0.7779,0.668
+a_brown_car_and_a_red_elephant,a_brown_car_and_a_red_elephant,a brown car and a red elephant,0.8487,0.9516,dpp,0.10289999999999999,0.8596,0.8487,0.8513,0.8368,0.9516,0.9287,0.8593
+a_bicycle_on_the_top_of_a_chicken,a_bicycle_on_the_top_of_a_chicken,a bicycle on the top of a chicken,0.8018,0.9046,mix,0.1028,0.8509,0.8018,0.8818,0.8078,0.83,0.9046,0.8512
+a_computer_on_the_left_of_a_pig,a_computer_on_the_left_of_a_pig,a computer on the left of a pig,0.8371,0.9333,dpp,0.09620000000000006,0.8393,0.8371,0.8131,0.8302,0.9333,0.9167,0.8385
+a_wallet_on_the_right_of_a_bee,a_wallet_on_the_right_of_a_bee,a wallet on the right of a bee,0.8419,0.9366,mix,0.0947,0.8552,0.8419,0.8405,0.8009,0.8786,0.9366,0.8549
+the_rectangular_mirror_was_hung_above_the_black_sink,The_rectangular_mirror_was_hung_above_the_black_sink,The rectangular mirror was hung above the black sink,0.7644,0.8569,mix,0.09250000000000003,0.7636,0.7644,0.7666,0.7244,0.7789,0.8569,0.761
+the_rectangular_painting_was_hung_above_the_silver_couch,The_rectangular_painting_was_hung_above_the_silver_couch,The rectangular painting was hung above the silver couch,0.7017,0.7941,mix,0.09240000000000004,0.7464,0.7017,0.7345,0.696,0.7543,0.7941,0.7387
+a_rabbit_on_the_top_of_a_book,a_rabbit_on_the_top_of_a_book,a rabbit on the top of a book,0.8587,0.9453,mix,0.08660000000000001,0.909,0.8587,0.9092,0.9015,0.8299,0.9453,0.909
+a_pink_car_and_a_red_elephant,a_pink_car_and_a_red_elephant,a pink car and a red elephant,0.8566,0.9409,mix,0.08429999999999993,0.9117,0.8566,0.9104,0.9135,0.8024,0.9409,0.9113
+a_bag_on_the_right_of_a_butterfly,a_bag_on_the_right_of_a_butterfly,a bag on the right of a butterfly,0.8712,0.9542,mix,0.08300000000000007,0.8992,0.8712,0.8918,0.8765,0.8876,0.9542,0.8991
+a_green_bench_and_a_brown_dog,a_green_bench_and_a_brown_dog,a green bench and a brown dog,0.8894,0.9715,mix,0.08210000000000006,0.9173,0.8894,0.9112,0.8898,0.9142,0.9715,0.9172
+the_red_umbrella_was_on_top_of_the_white_coat_rack,The_red_umbrella_was_on_top_of_the_white_coat_rack,The red umbrella was on top of the white coat rack,0.8627,0.9408,mix,0.07809999999999995,0.8397,0.8627,0.8569,0.8268,0.8572,0.9408,0.84
+the_red_hat_was_on_top_of_the_white_coat,The_red_hat_was_on_top_of_the_white_coat,The red hat was on top of the white coat,0.8216,0.8979,mix,0.07630000000000003,0.8255,0.8216,0.8149,0.7804,0.8476,0.8979,0.8251
+a_dog_on_the_top_of_a_suitcase,a_dog_on_the_top_of_a_suitcase,a dog on the top of a suitcase,0.8332,0.9084,mix,0.07519999999999993,0.8526,0.8332,0.8486,0.8329,0.7659,0.9084,0.8519
+the_wooden_spoon_was_next_to_the_green_bowl,The_wooden_spoon_was_next_to_the_green_bowl,The wooden spoon was next to the green bowl,0.8845,0.9571,mix,0.0726,0.9234,0.8845,0.9228,0.9234,0.8732,0.9571,0.9243
+the_black_chair_is_on_the_right_of_the_silver_desk,The_black_chair_is_on_the_right_of_the_silver_desk,The black chair is on the right of the silver desk,0.8496,0.9197,cads,0.07009999999999994,0.8961,0.8496,0.9197,0.8583,0.8509,0.904,0.8951
+a_red_car_and_a_brown_clock,a_red_car_and_a_brown_clock,a red car and a brown clock,0.8974,0.9664,mix,0.06900000000000006,0.9202,0.8974,0.9128,0.9197,0.8816,0.9664,0.9197
+the_rectangular_mirror_was_hung_above_the_blue_sink,The_rectangular_mirror_was_hung_above_the_blue_sink,The rectangular mirror was hung above the blue sink,0.8075,0.8722,mix,0.06469999999999998,0.7888,0.8075,0.7889,0.7544,0.792,0.8722,0.7889
+a_person_on_the_left_of_a_microwave,a_person_on_the_left_of_a_microwave,a person on the left of a microwave,0.8742,0.9382,mix,0.06400000000000006,0.8907,0.8742,0.8933,0.8592,0.914,0.9382,0.8906
+a_cup_on_the_left_of_a_fish,a_cup_on_the_left_of_a_fish,a cup on the left of a fish,0.8456,0.9092,mix,0.06359999999999999,0.8088,0.8456,0.8027,0.7826,0.8858,0.9092,0.8086

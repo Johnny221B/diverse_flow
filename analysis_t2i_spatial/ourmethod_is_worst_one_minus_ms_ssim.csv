@@ -1,0 +1,4 @@
+metric,prompt_key,prompt_folder,prompt_text,ourmethod_value,worst_value,worst_methods,best_method,best_value,gap_to_best,base,ourmethod,cads,pg,dpp,mix,apg
+one_minus_ms_ssim,a_giraffe_on_the_top_of_a_man,a_giraffe_on_the_top_of_a_man,a giraffe on the top of a man,0.5437,0.5437,ourmethod,cads,0.8307,0.28700000000000003,0.8268,0.5437,0.8307,0.548,0.5657,0.7151,0.6637
+one_minus_ms_ssim,a_pig_on_the_right_of_a_computer,a_pig_on_the_right_of_a_computer,a pig on the right of a computer,0.9118,0.9118,ourmethod,mix,0.943,0.031199999999999894,0.9322,0.9118,0.931,0.9145,,0.943,0.9279
+one_minus_ms_ssim,a_giraffe_on_the_right_of_a_phone,a_giraffe_on_the_right_of_a_phone,a giraffe on the right of a phone,0.9452,0.9452,ourmethod,mix,0.9712,0.025999999999999912,0.9457,0.9452,0.9523,0.9507,,0.9712,0.9682

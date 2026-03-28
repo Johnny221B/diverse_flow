@@ -1,0 +1,31 @@
+prompt_key,prompt_folder,prompt_text,vendi_inception__base,ourmethod_value,vendi_inception__cads,vendi_inception__pg,vendi_inception__dpp,vendi_inception__mix,vendi_inception__apg
+a_girl_on_the_left_of_a_bee,a_girl_on_the_left_of_a_bee,a girl on the left of a bee,2.3412,2.5813,2.462,2.5771,2.2239,2.4788,2.3351
+a_brown_dog_and_a_blue_horse,a_brown_dog_and_a_blue_horse,a brown dog and a blue horse,2.2122,2.4134,2.163,2.1022,1.6975,2.0552,2.2169
+a_man_on_the_right_of_a_plate,a_man_on_the_right_of_a_plate,a man on the right of a plate,2.3271,2.4117,2.263,2.4732,2.1354,2.5855,2.333
+a_cup_on_the_left_of_a_fish,a_cup_on_the_left_of_a_fish,a cup on the left of a fish,2.1297,2.3261,2.1423,2.2169,1.6929,2.4813,2.116
+a_wallet_on_the_right_of_a_dog,a_wallet_on_the_right_of_a_dog,a wallet on the right of a dog,2.256,2.3132,2.1823,2.128,2.1568,2.4685,2.2358
+a_blue_bench_and_a_green_car,a_blue_bench_and_a_green_car,a blue bench and a green car,2.081,2.287,2.1012,2.2235,1.9781,2.0993,2.0877
+the_brown_dog_was_lying_on_the_green_bed,The_brown_dog_was_lying_on_the_green_bed,The brown dog was lying on the green bed,2.2156,2.2731,2.3704,2.2003,1.7965,2.3781,2.2061
+a_blue_dog_and_a_brown_horse,a_blue_dog_and_a_brown_horse,a blue dog and a brown horse,2.3006,2.2703,2.2793,2.2745,2.3574,2.3534,2.3075
+a_bag_on_the_right_of_a_butterfly,a_bag_on_the_right_of_a_butterfly,a bag on the right of a butterfly,1.943,2.2503,1.4898,2.2272,2.2994,1.8518,1.9701
+a_wallet_on_the_right_of_a_bee,a_wallet_on_the_right_of_a_bee,a wallet on the right of a bee,2.3082,2.2468,2.3581,1.9475,2.0267,2.411,2.3134
+a_boy_on_the_top_of_a_bag,a_boy_on_the_top_of_a_bag,a boy on the top of a bag,2.2694,2.2256,2.3047,1.9875,2.1248,2.3808,2.2439
+the_green_plant_was_on_the_right_the_white_wall,The_green_plant_was_on_the_right_the_white_wall,The green plant was on the right the white wall,2.2566,2.2057,2.2471,2.4096,2.4417,2.0601,2.2181
+a_pink_car_and_a_red_elephant,a_pink_car_and_a_red_elephant,a pink car and a red elephant,2.1548,2.2007,2.0417,1.905,2.0309,2.0616,2.1414
+a_phone_on_the_left_of_a_boy,a_phone_on_the_left_of_a_boy,a phone on the left of a boy,2.3834,2.1957,2.2785,2.3569,2.2891,2.0305,2.4025
+a_red_car_and_a_pink_elephant,a_red_car_and_a_pink_elephant,a red car and a pink elephant,2.214,2.1939,2.1721,2.2606,1.8725,2.0683,2.2294
+a_brown_car_and_a_red_elephant,a_brown_car_and_a_red_elephant,a brown car and a red elephant,2.1587,2.0863,2.147,2.1001,2.4656,2.2046,2.1447
+a_bag_on_the_bottom_of_a_chicken,a_bag_on_the_bottom_of_a_chicken,a bag on the bottom of a chicken,2.0755,2.0696,2.1518,2.0894,2.3233,2.2314,2.0762
+a_backpack_on_the_right_of_a_bird,a_backpack_on_the_right_of_a_bird,a backpack on the right of a bird,1.8647,2.0606,1.9217,1.7688,1.6952,2.3539,1.8615
+a_red_bench_and_a_green_car,a_red_bench_and_a_green_car,a red bench and a green car,2.1377,2.0594,2.1506,2.0155,1.9229,2.049,2.1405
+a_computer_on_the_bottom_of_a_horse,a_computer_on_the_bottom_of_a_horse,a computer on the bottom of a horse,2.216,2.0423,2.2171,2.2126,2.2045,2.1506,2.2153
+a_yellow_bench_and_a_green_dog,a_yellow_bench_and_a_green_dog,a yellow bench and a green dog,2.0488,2.0337,1.9744,2.0607,2.0727,1.8865,2.0572
+a_bicycle_on_the_left_of_a_bird,a_bicycle_on_the_left_of_a_bird,a bicycle on the left of a bird,1.8491,2.0263,2.0156,1.9202,1.7973,1.7574,1.8507
+a_red_car_and_a_brown_elephant,a_red_car_and_a_brown_elephant,a red car and a brown elephant,1.8698,2.0258,1.8323,1.8292,1.7427,2.1564,1.8633
+a_green_bench_and_a_blue_car,a_green_bench_and_a_blue_car,a green bench and a blue car,2.1892,2.0103,2.2248,2.1175,1.9874,1.8093,2.1661
+a_gold_car_and_a_red_clock,a_gold_car_and_a_red_clock,a gold car and a red clock,1.8523,2.0051,1.7752,1.7281,1.9551,2.0672,1.822
+a_green_bench_and_a_red_car,a_green_bench_and_a_red_car,a green bench and a red car,2.1301,1.993,2.0801,2.056,2.1873,2.0461,2.1298
+a_television_on_the_right_of_a_cow,a_television_on_the_right_of_a_cow,a television on the right of a cow,1.8874,1.9913,1.914,1.7655,1.7889,1.9354,1.8143
+a_bicycle_on_the_top_of_a_chicken,a_bicycle_on_the_top_of_a_chicken,a bicycle on the top of a chicken,1.8478,1.9881,1.7845,1.8157,1.7659,2.0348,1.8435
+a_dog_on_the_top_of_a_suitcase,a_dog_on_the_top_of_a_suitcase,a dog on the top of a suitcase,2.0722,1.9861,1.9865,2.0833,2.0951,2.1294,2.0765
+a_brown_bench_and_a_green_dog,a_brown_bench_and_a_green_dog,a brown bench and a green dog,1.95,1.9684,1.8652,1.8936,2.2043,2.0438,1.9632

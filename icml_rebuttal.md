@@ -29,9 +29,30 @@ We thank the reviewer for raising this important point. We do provide a runtime 
 
 > Weakness 2: Limited qualitative diversity evidence
 
+We thank the reviewer for this helpful suggestion. We agree that the originally shown qualitative examples were relatively limited in scenario diversity. To better assess whether OSCAR improves diversity beyond fixed settings such as buses or restaurants, we conducted additional experiments on **T2I-Bench**, where we randomly sampled 80 prompts from each of the **color**, **complex**, and **spatial** subsets and generated images for comparison across methods using the same evaluation protocol.
+
+In addition, to provide more direct qualitative evidence, we selected one representative prompt from each subset and included the generated samples in the linked results: **“a blue bench and a green boat”** (color), **“a bicycle on the left of a bird”** (spatial), and **“The black camera was mounted on the silver tripod”** (complex). These examples were chosen to cover a broader range of compositional and attribute-binding scenarios than the original examples. The aggregated quantitative results over the 80 sampled prompts per subset are reported in the table below. Together, the expanded T2I-Bench evaluation and these qualitative cases provide stronger evidence that OSCAR improves diversity beyond the previously shown fixed scenarios.
+
+| method    | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim | BLIPvqa |
+|-----------|----------------:|------------:|-----------:|------------------:|--------:|
+| base      | 3.14            | 2.20        | 38.93      | 0.8868            | 0.8242  |
+| cads      | 3.16            | 2.21        | 38.98      | 0.8872            | 0.8257  |
+| pg        | 3.15            | 2.32        | 39.28      | 0.8653            | 0.8265  |
+| dpp       | 3.11            | 2.40        | 38.97      | 0.8750            | 0.8083  |
+| apg       | 3.09            | 2.38        | 39.14      | 0.8897            | 0.8371  |
+| ourmethod | 3.24            | 2.53        | 39.19      | 0.9025            | 0.8369  |
+
 > Weakness 3: Lack of challenging human/portrait examples (maintain image quality)
 
+We thank the reviewer for this helpful suggestion. To better demonstrate OSCAR’s ability to preserve image quality, we added a new set of challenging **portrait-focused qualitative examples** specifically designed to stress fine-grained visual fidelity, including **facial plausibility, skin and hand details, material rendering, and complex lighting conditions**. 
 
+Concretely, we constructed several detailed prompts involving human subjects, such as:  
+- *“A studio portrait of a person in 1920s vintage Gatsby-style formal wear, intricate lace and feather details, monochrome noir lighting.”*  
+- *“A portrait of an artist in a paint-splattered apron standing in front of a large abstract canvas, holding a brush, messy hair, warm studio light.”*  
+- *“A professional portrait of a master artisan working in a sunlit woodcarving workshop, fine dust in the air, highly detailed skin textures and hands.”*  
+- *“A medium-shot of a person wearing a glossy silk evening gown, standing on a rainy city balcony at night with vibrant neon reflections, high fashion style.”*
+
+For each prompt, we compare 4 generated samples across methods in the linked results. These examples were chosen because they are particularly sensitive to quality degradation under diversity enhancement. In these portrait settings, OSCAR continues to maintain realistic facial structure and fine local details while providing meaningful diversity, which offers additional qualitative evidence that our method preserves image quality more effectively than simpler diversity-oriented baselines.
 
 **Best regards,** 
 **Authors**
@@ -58,16 +79,7 @@ We thank the reviewer for pointing this out. We agree that APG is a relevant bas
 
 > Weakness 3: Limited concept coverage in evaluation
 
-We thank the reviewer for the suggestion and have conducted additional experiments on the color and complex subsets of T2I-Bench. Specifically, for each subset, we randomly sampled 80 prompts from the benchmark and generated 16 images per prompt. We then evaluated all methods using the same diversity and quality metrics as in the main paper. The results show that our method performs favorably against most baselines on both subsets, demonstrating a consistently strong overall performance across the evaluated metrics. These results further support our main claim that our method can improve output diversity while maintaining competitive generation quality.
-
-| method    | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim | BLIPvqa |
-|-----------|----------------:|------------:|-----------:|------------------:|--------:|
-| base      | 3.14            | 2.20        | 38.93      | 0.8868            | 0.8242  |
-| cads      | 3.16            | 2.21        | 38.98      | 0.8872            | 0.8257  |
-| pg        | 3.15            | 2.32        | 39.28      | 0.8653            | 0.8265  |
-| dpp       | 3.11            | 2.40        | 38.97      | 0.8750            | 0.8083  |
-| apg       | 3.09            | 2.38        | 39.14      | 0.8897            | 0.8371  |
-| ourmethod | 3.24            | 2.53        | 39.19      | 0.9025            | 0.8369  |
+We thank the reviewer for the suggestion and have conducted additional experiments on the color and complex subsets of T2I-Bench. Specifically, for each subset, we randomly sampled 80 prompts from the benchmark and generated 16 images per prompt. We then evaluated all methods using the same diversity and quality metrics as in the main paper. The results show that our method performs favorably against most baselines on both subsets, demonstrating a consistently strong overall performance across the evaluated metrics. These results further support our main claim that our method can improve output diversity while maintaining competitive generation quality. Due to space limits, we show only the **complex** results here; additional quantitative results can be found in the https://anonymous.4open.science/r/2026-ICML-rebuttal-BB38 under **Section 3: Quantitative Results on T2I-CompBench**.
 
 | method    | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim | BLIPvqa |
 |-----------|----------------:|------------:|-----------:|------------------:|--------:|
@@ -100,18 +112,7 @@ We thank the reviewer for the positive feedback, in particular for highlighting:
 
 > Weakness 1: Limited evaluation on complex prompts
 
-We thank the reviewer for the suggestion and have conducted additional experiments on the color and complex subsets of T2I-Bench. Specifically, for each subset, we randomly sampled 80 prompts from the benchmark and generated 16 images per prompt. We then evaluated all methods using the same diversity and quality metrics as in the main paper. The results show that our method performs favorably against most baselines on both subsets, demonstrating a consistently strong overall performance across the evaluated metrics. These results further support our main claim that our method can improve output diversity while maintaining competitive generation quality.
-
-We also observe that the hybrid SDE/ODE method is relatively competitive on several diversity-related metrics and is the closest baseline to ours in that regard. However, this comes with a noticeable degradation in quality: its CLIP score and BLIP-VQA are substantially lower than those of the other methods. This suggests that its diversity gains are achieved at the expense of text-image alignment and semantic correctness of the generated content. In contrast, our method achieves a better trade-off between diversity and quality, which we believe makes it more practically useful.
-
-| method    | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim | BLIPvqa |
-|-----------|----------------:|------------:|-----------:|------------------:|--------:|
-| base      | 3.14            | 2.20        | 38.93      | 0.8868            | 0.8242  |
-| cads      | 3.16            | 2.21        | 38.98      | 0.8872            | 0.8257  |
-| pg        | 3.15            | 2.32        | 39.28      | 0.8653            | 0.8265  |
-| dpp       | 3.11            | 2.40        | 38.97      | 0.8750            | 0.8083  |
-| mix       | 3.23            | 2.54        | 38.27      | 0.9375            | 0.8016  |
-| ourmethod | 3.24            | 2.53        | 39.19      | 0.9025            | 0.8369  |
+We thank the reviewer for the suggestion and conducted additional experiments on the **color** and **complex** subsets of T2I-Bench. For each subset, we randomly sampled **80 prompts** and generated **16 images per prompt**, using the same diversity and quality metrics as in the main paper. The results show that our method compares favorably with most baselines on both subsets, indicating consistently strong overall performance. We also find that the hybrid SDE/ODE baseline is competitive on some diversity metrics, but suffers clear drops in **CLIP score** and **BLIP-VQA**, suggesting weaker text-image alignment and semantic correctness. In contrast, our method achieves a better diversity–quality trade-off. Due to space limits, we show only the **complex** results here; additional quantitative results can be found in the https://anonymous.4open.science/r/2026-ICML-rebuttal-BB38 under **Section 3: Quantitative Results on T2I-CompBench**.
 
 | method    | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim | BLIPvqa |
 |-----------|----------------:|------------:|-----------:|------------------:|--------:|
@@ -120,7 +121,7 @@ We also observe that the hybrid SDE/ODE method is relatively competitive on seve
 | pg        | 3.02            | 1.94        | 35.37      | 0.7835            | 0.7811  |
 | dpp       | 2.93            | 1.99        | 35.55      | 0.7984            | 0.7914  |
 | mix       | 3.02            | 2.16        | 34.04      | 0.8201            | 0.7353  |
-| ourmethod | 3.15            | 2.13        | 35.53      | 0.8185            | 0.7952  |
+| oscar     | 3.15            | 2.13        | 35.53      | 0.8185            | 0.7952  |
 
 > Weakness 2: Missing Early-SDE + Late-ODE baseline
 
@@ -130,11 +131,22 @@ We also observe that the hybrid SDE/ODE method is relatively competitive on seve
 | mix_sde_ode | 5.0      | 165.70 ± 1.57 | 26.05 ± 0.28    | 4.31 ± 0.25    | 3.43 ± 0.16     |  84.58 ± 0.66  | 44.88 ± 1.78   |
 | mix_sde_ode | 7.5      | 166.04 ± 1.65 | 25.84 ± 0.31    | 4.06 ± 0.23    | 3.18 ± 0.15     |  83.74 ± 0.97  | 44.74 ± 1.83   |
 
-We additionally evaluated the Early-SDE + Late-ODE baseline on the simplest truck / bus / bicycle setting. We observed a consistent pattern: although this baseline tends to achieve relatively strong diversity metrics, its quality metrics are almost always the worst among all compared methods. In other words, its diversity gains come with a substantial degradation in generation quality. Due to the space limit, we only present the results for the bicycle case here.
-
-We further tested the same baseline on more complex scenarios, as shown in the table above, and observed the same trend. While the method remains competitive on some diversity-related metrics, it consistently underperforms in quality-related metrics such as CLIP Score and BRISQUE, indicating weaker text-image alignment and poorer visual fidelity. These results are consistent with our broader findings: compared with such baselines, our method achieves a more favorable trade-off between diversity and quality.
+We additionally evaluated the Early-SDE + Late-ODE baseline in both the simplest setting and more complex scenarios, and observed a consistent pattern: while it can obtain relatively strong diversity metrics, it consistently performs worse on quality-related metrics, indicating that its diversity gains come at the cost of degraded text-image alignment and visual fidelity. Due to space limits, we present only the bicycle results here. Overall, these results support our main conclusion that OSCAR achieves a more favorable diversity–quality trade-off than this simple hybrid-sampling baseline.
 
 > Weakness 3: Batch-coupled design / no offline alternative
+
+We thank the reviewer for this insightful question. We agree that OSCAR is batch-coupled in its current form, since the Gram-matrix-based repulsive term is defined over a jointly active set of trajectories. When \(m\) is small, the method remains applicable, but the diversity signal becomes more local. To address this concern, we include an additional small-batch evaluation with \(m=4\). Our preliminary results show that, although the diversity gain is weaker than in the larger-batch regime, OSCAR still consistently improves over the base model in this setting.
+
+| method | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim |
+|--------|----------------:|------------:|-----------:|------------------:|
+| base   | 1.84            | 1.64        | 37.75      | 0.8686            |
+| cads   | 1.83            | 1.64        | 37.82      | 0.8686            |
+| pg     | 1.83            | 1.58        | 37.81      | 0.8391            |
+| dpp    | 1.87            | 1.67        | 37.13      | 0.8654            |
+| mix    | 1.88            | 1.74        | 36.64      | 0.9033            |
+| oscar  | 1.88            | 1.76        | 37.95      | 0.8825            |
+
+More generally, a natural offline extension is to maintain a **memory bank of cached endpoint features** from previous generations. The repulsive term can then be computed not only against the currently active set, but also against these cached features, which would provide a broader semantic reference under low-VRAM or asynchronous generation settings. We view this as a promising generalization of the current online formulation and will clarify this point in the revision.
 
 **Best regards,** 
 **Authors**

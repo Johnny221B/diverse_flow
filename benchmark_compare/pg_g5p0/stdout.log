@@ -1,0 +1,26 @@
+[PG] concepts: 3 | total prompts: 3
+[PG]   - truck: 1 prompts
+[PG]   - bus: 1 prompts
+[PG]   - bicycle: 1 prompts
+[PG] outputs base: /data2/toby/OSCAR/outputs/pg_truck
+[PG] eval dir:     /data2/toby/OSCAR/outputs/pg_truck/eval
+[PG] imgs root:    /data2/toby/OSCAR/outputs/pg_truck/imgs
+[PG] Loading SD3 pipeline from: models/stable-diffusion-3.5-medium/stabilityai/stable-diffusion-3___5-medium
+[PG] sampling: concept='truck' | prompt='a photo of a truck' | seed=1111 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_truck/imgs/a_photo_of_a_truck_seed1111_g5.0_s30
+[PG] sampling: concept='truck' | prompt='a photo of a truck' | seed=3333 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_truck/imgs/a_photo_of_a_truck_seed3333_g5.0_s30
+[PG] sampling: concept='truck' | prompt='a photo of a truck' | seed=5555 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_truck/imgs/a_photo_of_a_truck_seed5555_g5.0_s30
+[PG] outputs base: /data2/toby/OSCAR/outputs/pg_bus
+[PG] eval dir:     /data2/toby/OSCAR/outputs/pg_bus/eval
+[PG] imgs root:    /data2/toby/OSCAR/outputs/pg_bus/imgs
+[PG] Loading SD3 pipeline from: models/stable-diffusion-3.5-medium/stabilityai/stable-diffusion-3___5-medium
+[PG] sampling: concept='bus' | prompt='a photo of a bus' | seed=1111 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_bus/imgs/a_photo_of_a_bus_seed1111_g5.0_s30
+[PG] sampling: concept='bus' | prompt='a photo of a bus' | seed=3333 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_bus/imgs/a_photo_of_a_bus_seed3333_g5.0_s30
+[PG] sampling: concept='bus' | prompt='a photo of a bus' | seed=5555 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_bus/imgs/a_photo_of_a_bus_seed5555_g5.0_s30
+[PG] outputs base: /data2/toby/OSCAR/outputs/pg_bicycle
+[PG] eval dir:     /data2/toby/OSCAR/outputs/pg_bicycle/eval
+[PG] imgs root:    /data2/toby/OSCAR/outputs/pg_bicycle/imgs
+[PG] Loading SD3 pipeline from: models/stable-diffusion-3.5-medium/stabilityai/stable-diffusion-3___5-medium
+[PG] sampling: concept='bicycle' | prompt='a photo of a bicycle' | seed=1111 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_bicycle/imgs/a_photo_of_a_bicycle_seed1111_g5.0_s30
+[PG] sampling: concept='bicycle' | prompt='a photo of a bicycle' | seed=3333 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_bicycle/imgs/a_photo_of_a_bicycle_seed3333_g5.0_s30
+[PG] sampling: concept='bicycle' | prompt='a photo of a bicycle' | seed=5555 | cfg=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/pg_bicycle/imgs/a_photo_of_a_bicycle_seed5555_g5.0_s30
+[PG] Done.

@@ -121,7 +121,7 @@ def parse_args():
     # 生成参数
     ap.add_argument('--prompt', type=str, required=True)
     ap.add_argument('--negative', type=str, default='')
-    ap.add_argument('--G', type=int, default=64)  # 默认 64
+    ap.add_argument('--G', type=int, default=16)  # 默认 64
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)

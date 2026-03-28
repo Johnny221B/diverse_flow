@@ -2,7 +2,8 @@
 
 **Dear Reviewer Q6XH,**
 
-**Thank you for your thoughtful and encouraging review. We sincerely appreciate your positive assessment of our work and your recognition of its potential. Below, we address your specific comments in more detail:**
+We thank the reviewer for the positive feedback, in particular for highlighting **(i) the importance of the problem, (ii) the clarity of the writing, (iii) the simplicity and elegance of the method, and (iv) the breadth of the experimental evaluation.** We address the remaining concerns point by point below.
+
 
 > Weakness 1 Missing simplest FM baselines  / compute-matched comparison
 
@@ -27,7 +28,7 @@ Regarding the visual comparison for the ablation study, we fully agree that show
 
 > Weakness 3 & Question 1 – Definition and role of $t_{\text{gate}}$
 
-- In our final convention, **$t_{\text{gate}}$** is a **scalar end-time of noise injection**: the stochastic term is active on the interval $[t_{\text{start}}, t_{\text{gate}}]$. In all robustness ablations in the main paper, we fix $t_{\text{start}} = 0.05$ and sweep $t_{\text{gate}}$; this is what Fig. 7(c) and Table 17 are visualizing.
+- In our final convention, **$t_{\text{gate}}$** is a **scalar end-time of noise injection**: the stochastic term is active on the interval $[t_{\text{start}}, t_{\text{gate}}]$. In all robustness ablations in the main paper, we fix $t_{\text{start}} = 0.05$ and sweep $t_{\text{gate}}$; this is what Fig. 7(c) and Table 18 are visualizing.
 - The **interval notation** $[t_{\text{start}}, t_{\text{end}}]$ that appears in parts of the appendix is a leftover from an earlier draft where we denoted the gate by its start and end times. In the final implementation and experiments, we use $t_{\text{end}} \equiv t_{\text{gate}}$. We will unify the notation across the main text, figures, and appendix to always use $[t_{\text{start}}, t_{\text{gate}}]$.
 - Fundamentally, $t_{\text{gate}}$ serves as a practical **engineering heuristic** to ensure the final image quality. In SDE-based sampling, injecting noise up to the very last step ($t=1$) prevents the solver from settling onto the clean data manifold, leaving residual noise. Therefore, $t_{\text{gate}}$ is simply a switch to turn off stochasticity near the end to guarantee convergence, it is not a theoretical hyperparameter coupled with our core orthogonal control algorithm.
 - We respectfully clarify that the degradation observed in Section 5.2 does **not** imply parameter sensitivity, but rather demonstrates the **necessity of the gate mechanism**.
@@ -46,11 +47,9 @@ Regarding Fig. 15, the confusion partly comes from an earlier **convention switc
 
 **Dear Reviewer yFhz,**
 
-**Thank you for your thoughtful and encouraging review. We sincerely appreciate your positive assessment of our work and your recognition of its potential. Below, we address your specific comments in more detail:**
+We thank the reviewer for highlighting the strong **empirical performance of our method across multiple metrics (Table 1)**. Below, we address your specific comments in more detail:
 
 > Weakness 1 Response to Question regarding Figure 2 and True Distribution
-
-**Regarding Fig. 2 and the notion of “mode collapse”.**
 
 We agree that our wording was imprecise here, and we thank the reviewer for pointing this out.
 
@@ -64,7 +63,7 @@ We have moved the original experiment with $N=2000$ to Appendix E.1 . We added a
 
 > Weakness 2
 
-1. **Heun endpoint predictor is not a separate pretrained model, and its choice is robust.**  
+   **Heun endpoint predictor is not a separate pretrained model, and its choice is robust.**  
    The “Heun second-order extrapolation” in Algorithm 1 is a **standard numerical integrator**, not a separate neural network. At each step, we evaluate the same FM backbone twice (as in a usual second-order solver) and use these two evaluations to form a **closed-form extrapolation of the feature trajectory**, which we denote as the endpoint predictor $\hat\psi$. Thus:
    - there is **no additional pretrained feature predictor** beyond the base FM model;
    - Heun adds only **one extra backbone evaluation per step**, which is already accounted for in the reported NFE.
@@ -240,7 +239,7 @@ These results indicate that OSCAR’s hyperparameters are largely consistent acr
 
 **Dear Reviewer avHK,**
 
-**Thank you for your thoughtful and encouraging review. We sincerely appreciate your positive assessment of our work and your recognition of its potential. Below, we address your specific comments in more detail:**
+We thank the reviewer for the positive and detailed feedback, especially for highlighting **(i) our clear motivation and elegant formulation, (ii) the training-free, plug-and-play nature of OSCAR, (iii) its good empirical results, and (iv) its efficiency and accompanying analysis**. We address the remaining comments point by point below.
 
 
 > Weakness 1 – General quality evaluation on random prompts
@@ -300,6 +299,7 @@ In this work we intentionally keep the sampler simple to make comparisons agains
 
 
 **Best regards,**
+
 **Authors**
 
 
@@ -307,7 +307,8 @@ In this work we intentionally keep the sampler simple to make comparisons agains
 
 **Dear Reviewer c5nD,**
 
-**Thank you for your thoughtful and encouraging review. We sincerely appreciate your positive assessment of our work and your recognition of its potential. Below, we address your specific comments in more detail:**
+We thank the reviewer for the positive feedback, especially for appreciating **(i) our principled combination of feature-volume gradient and stochastic noise, (ii) the orthogonal-projection design that decouples quality from diversity, and (iii) the empirical improvements over baselines**. We address the remaining comments point by point below.
+
 
 > Weakness 1 – Step-by-step ablation of OP and RR, and comparison to naïve setup
 
@@ -445,4 +446,116 @@ These results demonstrate that OSCAR is **not tied to a single architecture**, b
 
 
 **Best regards,**
+
+**Authors**
+
+---
+
+> Addtional Reviewer 2
+
+**Regarding the “Figure R1” reference.**
+
+We apologize for the confusion — this was a typo in our previous response. The revised experiment with fewer particles (N = 200) is now reported in **Figure 2** of the main paper, rather than in a separate Figure R1. In addition, in Appendix **E.1 “Toy example 1: Behavior in high-particle regimes”** we report results for a much larger number of particles (N = 2000), with the corresponding plots shown in  **Figure 12** . We will correct the erroneous reference to “Figure R1” to avoid confusion.
+
+
+**Clarifying the purpose of Figure 2 and the role of the blue starting points.**
+
+In this toy experiment, the standard Gaussian at $t=0$ represents the usual “pure noise” prior in text-to-image models: for a fixed prompt, we always start from this prior. The nine mixture components (black crosses) stand for nine well-separated semantic classes (e.g., *dog, cat,* …). Each initial particle is transported to one of these components, and its final location determines its class. The light–blue points and dashed segments connect every initial particle to its final location under each sampler. They serve two purposes: (i) they make it explicit that standard FM and OSCAR use  **exactly the same set of seeds** , and (ii) they show that each particle ends up in the **same component** under both methods, so our diversity control does not cause samples to “jump across classes”.
+
+The goal of this toy is therefore *not* to approximate a prescribed optimal transport map to the uniform 3×3 mixture, but to illustrate how OSCAR can increase **within-class diversity** while keeping the class assignments unchanged. Standard FM moves particles to the correct components but collapses them into tight clusters very close to the means, resulting in low intra-mode variance. OSCAR preserves the same component assignments but spreads particles across a much larger portion of each component’s high-density region, yielding substantially higher intra-mode variance and entropy, which alighs the results in our Fig 4(b). In this sense, OSCAR is better because it achieves more diverse samples per class without altering which semantic class each particle belongs to.
+
+**On Heun, and NFE fairness.**
+
+We fully agree with [1] that simply increasing the number of function evaluations (NFE) is not a principled way to improve samplers, and our goal is *not* to gain performance by giving some predictors a larger NFE budget. In particular, while a **classical** Heun step indeed requires an additional evaluation of the backbone predictor compared to Euler, in the experiments reported in the paper we deliberately avoid this extra sample. For all predictor variants (Euler, “Heun-style”, midpoint, current), the **number of backbone predictor evaluations per step is identical**, so the NFE is matched in all experiments, including the robustness study.
+
+The confusion comes from our wording around the “Heun endpoint predictor” in Algorithm 1. The algorithmic *idea* is inspired by Heun’s method, but the actual implementation we use is a finite-difference, analytic extrapolation that does not call the backbone predictor a second time. Concretely, let \(z_k\) denote the latent at step \(k\) produced by the underlying sampler with step size \(\Delta t_k\), and let \(\Delta z^{\mathrm{ctrl}}_{k-1}\) be the OSCAR control displacement applied at step \(k-1\). We first form a finite-difference estimate of the latent velocity
+\[
+v_k \;\approx\;
+\frac{z_k - z_{k-1} - \Delta z^{\mathrm{ctrl}}_{k-1}}{\Delta t_{k-1}},
+\]
+and then construct the endpoint latent via an analytic extrapolation
+\[
+z_{\mathrm{ep}} \;=\; z_k \;+\; \alpha(t_k)\, v_k,
+\]
+where \(\alpha(t_k)\) is a scalar function of time (different choices of \(\alpha\) correspond to the “Heun / Euler / midpoint / current” modes in our code). This construction is a **deterministic algebraic function** of the already available latents \((z_{k-1}, z_k)\); it does not invoke the FM backbone predictor again, and therefore does not increase NFE. Compared to a naive Euler endpoint that uses only a single local prediction, our predictor leverages two consecutive latent states of the base sampler to recover a higher-quality estimate of the latent velocity. This yields more accurate endpoints at exactly the same NFE, which is why we prefer this predictor over a pure Euler endpoint in our experiments.
+
+In light of the reviewer’s comment, we have (i) provided a detailed explanation of our process of selecting the predictor in the Appendix C, and (ii) clarified in the Appendix F that the predictor NFE is matched across all methods in our robustness study.
+
+**Regarding the term “closed-form extrapolation”.**  
+We agree that our use of the term “closed-form” in the original response was imprecise. We did not mean to suggest that the underlying ODE has a closed-form analytic solution. What we intended to convey is that, once the backbone predictor has been evaluated at the two points used in the Heun-style step, the endpoint latent is obtained by an **explicit algebraic formula**, rather than by running an additional iterative solver or optimization.
+
+**On the number of hyperparameters and their robustness.** 
+We appreciate the concern about the apparent number of hyperparameters in OSCAR. Conceptually, however, only a small subset of them meaningfully controls the behavior of the method, and we intentionally do not tune them per model or dataset. The remaining parameters are fixed numerical-stability constants. Among the “semantic” hyperparameters, the most important ones are the time gate \(t_{\text{gate}}\) for when diversity is active and the global SDE noise scale \(\eta_{\text{sde}}\). In Appendix F we show that OSCAR is highly insensitive to these choices as long as they are not taken to extreme values: any \(t_{\text{gate}}\) that does not collapse to the endpoints (i.e., far from 0 or 1), and any \(\eta_{\text{sde}}\) in a broad mid-range (roughly between 0.1 and 20), produce essentially indistinguishable images in terms of both quality and diversity. The two orthogonality coefficients (`partial-ortho` and `noise-partial-ortho`) are fixed to 0.95 throughout all experiments and never tuned; they simply enforce “almost orthogonal” corrections, and we found this single setting to work across models and datasets. The remaining parameters in Table X are best viewed as implementation details rather than user-facing hyperparameters. The schedule shape (`sched-shape`) only needs to impose a decreasing trend for the diversity strength; Appendix B and F show that using different smooth shapes (cosine, triangular, etc.) has negligible impact on the generated images. The scalar \(\tau\) appears because our volume term is proportional to a log-determinant; we fix \(\tau = 1\) for all experiments and never adjust it. Parameters such as `eps-logdet` and `vnorm-threshold` are small positive constants introduced solely to avoid degenerate gradients (division by zero and vanishing norms); they are set once to near-zero values and kept fixed. In summary, while Table X lists several symbols for completeness, in practice OSCAR exposes only a very small number of effective knobs, and we use the same default configuration across all models and datasets. Our ablations in Appendix F indicate that the method is robust to these choices, and the reported gains do not rely on careful hyperparameter tuning.
+
+**On runtime / FLOPs and the magnitude of gains.** 
+
+To directly address the concern that OSCAR might simply benefit from extra compute, we include a compute-matched study in Appendix E (Table 13), where we compare OSCAR to two strengthened FM-SD3.5 variants under approximately matched FLOPs: (i) increasing the number of particles, and (ii) increasing the NFE. The results are summarized below:
+
+| Method        | NFE | Particles | FLOPs (T/run) | CLIP ↑           | Vendi (Pixel) ↑   | FID ↓             | BRISQUE ↓         |
+|--------------|-----|-----------|---------------|------------------|-------------------|-------------------|-------------------|
+| FM-SD3.5     | 30  | 32        | 4.09          | 28.24 ± 0.18     | 2.45 ± 0.13       | 164.4 ± 1.8       | 23.4 ± 1.4        |
+| +K particles | 30  | 48        | 6.14          | 28.15 ± 0.23     | 2.60 ± 0.21       | **149.7 ± 1.3**   | 23.5 ± 1.7        |
+| +N NFE       | 40  | 32        | 5.43          | 28.15 ± 0.21     | 2.40 ± 0.15       | 165.3 ± 1.8       | 24.6 ± 1.7        |
+| **OSCAR**    | 30  | 32        | 5.53          | **28.26 ± 0.22** | **2.86 ± 0.05**   | 163.3 ± 1.6       | **21.2 ± 1.5**    |
+
+Under similar or slightly lower compute, OSCAR consistently improves both diversity and perceptual quality over the FM baselines on our main diversity metric Vendi Pixel as well as CLIP and BRISQUE. The FM-SD3.5 variant with more particles attains a slightly better FID, but FID is known to be highly sensitive to the number of generated samples when the evaluation set is relatively small; in our setting, this variant uses more particles per run than OSCAR, which partially explains its lower FID. Overall, the compute-matched results support that OSCAR brings benefits beyond simply drawing more samples or increasing NFE, and that the additional complexity and moderate overhead are justified by consistent gains in set-level diversity (Vendi Pixel / Inception) and competitive or improved perceptual quality.
+
+---
+
+Dear Area Chair and Senior Area Chair,
+
+We understand that due to the recent incident, review scores have been reverted to their pre-discussion state. We sincerely appreciate the time and effort dedicated by all reviewers and by the previous AC to this paper. To facilitate your quick review of the current status, we provide:
+
+1. A brief summary of our contributions, and
+2. A summary of the rebuttal updates and discussion outcomes.
+
+## 1. Brief Summary of Contributions
+
+This paper introduces a **training-free control mechanism** that operates on intermediate features and sampling time to directly improve **set-level semantic diversity**, while preserving the image quality and prompt alignment of the underlying pretrained generator. Through theoretical analysis and extensive experiments across prompts, concepts, models, metrics, and compute budgets, we show that **orthogonal stochastic control provides a practical and robust way to obtain more diverse yet high-quality generations**.
+
+
+## 2. Rebuttal and Discussion Summary
+
+Scores: pre-discussion (6, 4, 4, 4) to post-discussion (6, 4, 4, 6). The score increase occurred on Nov 26, when Reviewer c5nD explicitly stated that most of concerns are addressed and raised their score from 4 to 6. Reviewer yFhz made many concrete suggestions; we engaged in a round of detailed discussion with this reviewer and addressed most of their concerns. The remaining minor issues mainly stem from potential misunderstandings caused by our original illustrations and wording, which we have clarified in the revised version. Reviewers Q6XH and avHk have not yet replied in the discussion, but their comments mainly requested additional experiments and minor typo corrections, and we believe we have fully addressed their specific requests in the revision.
+
+### Reviewer Q6XH (Score: 6, confidence 5)
+
+Reviewer Q6XH praised the importance of studying diversity in pretrained diffusion/flow models and the clarity and simplicity of our method. Their main concerns were: (i) the lack of a simplest FM baseline with \(N\) independent samples and of a compute-matched comparison to rule out gains from simply using more particles or larger NFE; (ii) the absence, in the qualitative ablation of Fig. 6, of OSCAR samples without ablations; (iii) unclear definition and role of the noise gate \(t_{\text{gate}}\) and whether the observed degradation indicates parameter sensitivity; and (iv) minor formatting and notation issues in Algorithm 1 and Fig. 15.
+
+In the revision, we added an “FM-SD3.5 (N particles)” baseline in Table 1 and a compute-matched study in Appendix E (Table 13), showing that OSCAR consistently improves both diversity and perceptual quality beyond simply increasing the number of samples or NFE. We provided a comprehensive side-by-side qualitative comparison including the full OSCAR model and all ablated variants in Appendix G. We clarified that \(t_{\text{gate}}\) is a scalar end-time of noise injection, unified the notation across the paper, and expanded the robustness study in Appendix F (Table 18), which demonstrates that performance is stable over a broad range of \(t_{\text{gate}}\); the degradation case corresponds to the extreme setting of full-trajectory noise. 
+
+With these added baselines, clarifications, and robustness experiments, we believe we have fully addressed Reviewer Q6XH’s concerns while preserving their overall positive assessment of the paper.
+
+
+### Reviewer yFhz (Score: 4, confidence 4)
+
+Reviewer yFhz acknowledged the strong empirical performance of our method across multiple metrics but raised several detailed concerns about algorithmic complexity and overhead, the accuracy and role of the Heun endpoint predictor, the definition of the toy distribution in Fig. 2, the interpretation of our volume objective and its hyperparameters, the clarity of Eq. (4) and the term “stochastic control”, the readability of Appendix B, the relation to Stochastic Density Guidance (SDG), the strength of our theoretical guarantees, and the consistency of hyperparameters across models.
+
+In the revision, we clarified the target distribution and behavior of the toy example and replaced the original figure with a revised experiment using fewer particles, accompanied by an extended explanation in Appendix E.1. We showed via a robustness study (removing the predictor, Euler, midpoint, and our Heun-style predictor) that our endpoint scheme is both robust and empirically best, and clarified that it is a deterministic algebraic extrapolation that does not increase the number of backbone evaluations, so NFE is matched across all predictor variants. We gave a geometric interpretation of the volume objective as a regularized log-determinant of the Gram matrix, explained the roles of the hyperparameters \(\tau\) and \(\epsilon_r\), and reorganized Appendix B with explicit lemmas, proofs, and chain-rule derivations of Eq. (4). We refined our terminology, and added a dedicated comparison to SDG, strengthened the theoretical analysis with a dual characterization of the sampling distribution, and reported detailed FLOPs, wall-clock time, and peak VRAM showing only moderate overhead relative to FM-SD3.5 and much lower cost than DPP. We also provided prompt-level and concept-level variance analyses and cross-backbone experiments on SDXL-Turbo and SD1.5, demonstrating that our hyperparameters transfer well across models with only light tuning and that the diversity gains are robust while quality metrics remain stable. In a second round of discussion, we further clarified the new figure, emphasized NFE fairness across all predictor choices, and clarified that most hyperparameters are included only for mathematical well-posedness and numerical stability, while the results are empirically robust to the remaining semantic ones. 
+
+Although the reviewer did not have time to respond again in the second round, we believe that the additional clarifications and experiments have addressed the majority of their concerns.
+
+
+
+### Reviewer avHk (Score: 4, confidence 3)
+
+Reviewer avHk highlighted our clear motivation and geometrically principled formulation, the training-free and plug-and-play nature of OSCAR, its good empirical results, and the efficiency of our analysis. Their main concerns were: (i) verifying on a large random prompt suite that OSCAR does not systematically degrade single-sample quality; (ii) analyzing the dependence of the volume objective on the choice of feature encoder; and (iii) clarifying the relation between OSCAR and high-order samplers, in particular whether they are complementary or conflicting.
+
+In the revision, we conducted an additional large-scale evaluation on 400 ImageNet-style random prompts with one image per prompt and standard quality/alignment metrics, showing that OSCAR achieves the best or competitive scores across all methods and thus does not introduce systematic single-sample quality degradation under a broad, unbiased prompt distribution. To study feature-space dependence, we replaced the default CLIP encoder with two widely used alternatives, Inception and DINO, while keeping all other components and hyperparameters fixed; across all three encoders, fidelity and alignment metrics are comparable and the diversity gains vary only slightly within overlapping confidence intervals, indicating that OSCAR’s benefits are not tied to a specific feature space. Finally, we added a short discussion on high-order samplers, clarifying that they work at the numerical level to reduce integration error for a fixed base dynamics, whereas OSCAR directly modifies the dynamics via an orthogonal drift and stochastic noise to introduce a controlled bias for better set-level diversity. Conceptually their goals differ, but OSCAR can still be combined with any high-order integrator, which we highlight as a natural direction for future work.
+
+With these additional experiments and clarifications, we believe we have fully addressed Reviewer avHk’s concerns.
+
+### Reviewer c5nD (Score: 4 → 6, confidence 4)
+
+Reviewer c5nD appreciated the principled combination of feature-volume gradients and stochastic noise, the orthogonal-projection design that decouples quality from diversity, and the empirical improvements over baselines. Their main concerns were: (i) the ablation lacked a naïve setup and did not clearly separate the individual contributions of OP and RR; (ii) the diversity gains were not sufficiently validated with human-aligned perceptual quality metrics; (iii) there was a discrepancy between PRD curves and reported AUCs and no analysis of expected diversity over random class subsets or prompts; (iv) the actual wall-clock cost, FLOPs, and the precise role of the Heun endpoint predictor were unclear; and (v) the generality of the method beyond the main FM-SD3.5 backbone needed further evidence.
+
+In the revision, we added a full step-wise ablation starting from a naïve variant without OP/RR and then enabling OP and RR individually and jointly, showing that OP and RR are essential safeguards that turn a very strong but unstable diversity drive into a practical sampler and that the full method outperforms all baselines on both diversity and quality metrics. We introduced additional perceptual metrics (ImageReward and CLIP-IQA) and showed that OSCAR’s image quality remains on par with or slightly better than all dbaselines while substantially improving set-level diversity. We fixed the PRD/AUC inconsistency by adopting a more robust histogram estimator, expanded the evaluation to more concepts and CFG levels, and added both concept-level variance analysis and prompt-level variance analysis (including new experiments on random concepts such as “apple”, “pizza”, and “suitcase”) to clarify expected diversity over classes and prompts. We clarified that “Heun” in OSCAR is a lightweight feature-space extrapolation scheme that reuses existing features, and we reported detailed FLOPs, wall-clock time, and peak VRAM, showing only moderate overhead relative to the FM baseline and substantially lower cost than DPP. Finally, we demonstrated generalization to additional backbones (SDXL-Turbo and SD1.5), where OSCAR consistently improves diversity with competitive or improved fidelity. 
+
+After these updates, Reviewer c5nD commented that “most of my concerns are addressed” and raised their score from 4 to 6.
+
+We sincerely appreciate your dedication and extra efort in navigating these chalenging times forthe Ml communiy. We trusthathe ful context of the discausion,particularly the unanimousconsensus reached, will be helpful for your final assessment.
+
+
+**Best regards,**
+
 **Authors**

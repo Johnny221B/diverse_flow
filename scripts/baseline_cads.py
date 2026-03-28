@@ -69,10 +69,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Sampling
     p.add_argument("--G", type=int, default=4, help="Images per prompt")
-    p.add_argument("--steps", type=int, default=40, help="Inference steps")
+    p.add_argument("--steps", type=int, default=30, help="Inference steps")
     p.add_argument("--guidance", type=float, default=7.5, help="CFG scale")
-    p.add_argument("--height", type=int, default=1024)
-    p.add_argument("--width", type=int, default=1024)
+    p.add_argument("--height", type=int, default=512)
+    p.add_argument("--width", type=int, default=512)
     p.add_argument("--seed", type=int, default=1234)
     p.add_argument("--dtype", type=str, default="fp16", choices=["fp16", "fp32", "bf16"])
 

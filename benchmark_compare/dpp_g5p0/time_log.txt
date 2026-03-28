@@ -1,0 +1,5 @@
+Command exited with non-zero status 2
+REAL=1.70
+USER=2.30
+SYS=7.88
+MAXRSS=429472

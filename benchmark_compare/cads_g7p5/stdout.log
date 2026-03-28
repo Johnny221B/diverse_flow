@@ -1,0 +1,21 @@
+[CADS] Resolving model from: ./models/stable-diffusion-3.5-medium
+[CADS] Using diffusers folder: models/stable-diffusion-3.5-medium/stabilityai/stable-diffusion-3___5-medium
+[CADS] outputs base: /data2/toby/OSCAR/outputs/cads_truck
+[CADS] eval dir:     /data2/toby/OSCAR/outputs/cads_truck/eval
+[CADS] imgs root:    /data2/toby/OSCAR/outputs/cads_truck/imgs
+[CADS] sampling: concept='truck' | prompt='a photo of a truck' | seed=1111 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_truck/imgs/a_photo_of_a_truck_seed1111_g7.5_s30
+[CADS] sampling: concept='truck' | prompt='a photo of a truck' | seed=3333 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_truck/imgs/a_photo_of_a_truck_seed3333_g7.5_s30
+[CADS] sampling: concept='truck' | prompt='a photo of a truck' | seed=5555 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_truck/imgs/a_photo_of_a_truck_seed5555_g7.5_s30
+[CADS] outputs base: /data2/toby/OSCAR/outputs/cads_bus
+[CADS] eval dir:     /data2/toby/OSCAR/outputs/cads_bus/eval
+[CADS] imgs root:    /data2/toby/OSCAR/outputs/cads_bus/imgs
+[CADS] sampling: concept='bus' | prompt='a photo of a bus' | seed=1111 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_bus/imgs/a_photo_of_a_bus_seed1111_g7.5_s30
+[CADS] sampling: concept='bus' | prompt='a photo of a bus' | seed=3333 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_bus/imgs/a_photo_of_a_bus_seed3333_g7.5_s30
+[CADS] sampling: concept='bus' | prompt='a photo of a bus' | seed=5555 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_bus/imgs/a_photo_of_a_bus_seed5555_g7.5_s30
+[CADS] outputs base: /data2/toby/OSCAR/outputs/cads_bicycle
+[CADS] eval dir:     /data2/toby/OSCAR/outputs/cads_bicycle/eval
+[CADS] imgs root:    /data2/toby/OSCAR/outputs/cads_bicycle/imgs
+[CADS] sampling: concept='bicycle' | prompt='a photo of a bicycle' | seed=1111 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_bicycle/imgs/a_photo_of_a_bicycle_seed1111_g7.5_s30
+[CADS] sampling: concept='bicycle' | prompt='a photo of a bicycle' | seed=3333 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_bicycle/imgs/a_photo_of_a_bicycle_seed3333_g7.5_s30
+[CADS] sampling: concept='bicycle' | prompt='a photo of a bicycle' | seed=5555 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/cads_bicycle/imgs/a_photo_of_a_bicycle_seed5555_g7.5_s30
+[CADS] Done.

@@ -142,7 +142,7 @@ def parse_args():
     ap.add_argument('--prompt', type=str, default=None,
                     help='单个 prompt；如指定 --spec 则忽略此项')
     ap.add_argument('--negative', type=str, default='')
-    ap.add_argument('--G', type=int, default=32)
+    ap.add_argument('--G', type=int, default=16)
     ap.add_argument('--height', type=int, default=512)
     ap.add_argument('--width', type=int, default=512)
     ap.add_argument('--steps', type=int, default=30)

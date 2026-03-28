@@ -1,0 +1,20 @@
+[before-pipeline-call]
+  cuda:0: used=0.26 GB, free=47.14 GB
+  cuda:1: used=0.26 GB, free=47.14 GB
+  cuda:0: used=0.26 GB, free=47.14 GB
+scheduler: FlowMatchEulerDiscreteScheduler
+[pipe-devices] {'transformer': 'cuda:0', 'text_encoder': 'cuda:0', 'text_encoder_2': 'cuda:0', 'text_encoder_3': 'cuda:0', 'vae': 'module(no params)', 'tokenizer': 'non-module', 'tokenizer_2': 'non-module', 'tokenizer_3': 'non-module', 'scheduler': 'non-module'}
+[13:16:04] [OUT] base=/data2/toby/OSCAR/outputs/ourmethod_single
+[13:16:04] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=1111 | guidance=3.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed1111_g3.0_s30
+[13:20:28] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=2222 | guidance=3.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed2222_g3.0_s30
+[13:24:47] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=3333 | guidance=3.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed3333_g3.0_s30
+[13:29:06] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=4444 | guidance=3.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed4444_g3.0_s30
+[13:33:26] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=1111 | guidance=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed1111_g5.0_s30
+[13:37:44] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=2222 | guidance=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed2222_g5.0_s30
+[13:42:02] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=3333 | guidance=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed3333_g5.0_s30
+[13:46:20] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=4444 | guidance=5.0 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed4444_g5.0_s30
+[13:50:39] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=1111 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed1111_g7.5_s30
+[13:54:57] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=2222 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed2222_g7.5_s30
+[13:59:14] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=3333 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed3333_g7.5_s30
+[14:03:32] [RUN] concept='single' | prompt='a photo of a potted plant' | seed=4444 | guidance=7.5 | steps=30 -> /data2/toby/OSCAR/outputs/ourmethod_single/imgs/a_photo_of_a_potted_plant_seed4444_g7.5_s30
+[14:07:49] Done.

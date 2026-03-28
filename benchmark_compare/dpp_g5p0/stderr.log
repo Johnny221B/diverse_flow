@@ -1,0 +1,12 @@
+usage: baseline_dpp.py [-h] --prompt PROMPT [--G G] [--steps STEPS]
+                       [--guidance GUIDANCE] [--seed SEED]
+                       [--device_transformer DEVICE_TRANSFORMER]
+                       [--device_vae DEVICE_VAE] [--device_clip DEVICE_CLIP]
+                       [--model-dir MODEL_DIR] [--fp16] [--enable_vae_tiling]
+                       [--enable_xformers] --openai_clip_jit_path
+                       OPENAI_CLIP_JIT_PATH [--gamma_max GAMMA_MAX]
+                       [--kernel_spread KERNEL_SPREAD]
+                       [--gamma_sched {sqrt,sin2,poly}]
+                       [--clip_grad_norm CLIP_GRAD_NORM]
+                       [--decode_size DECODE_SIZE] [--chunk_size CHUNK_SIZE]
+baseline_dpp.py: error: unrecognized arguments: --sd_device cuda:0 --vision_device cuda:0 --vision_backend openai_clip_jit

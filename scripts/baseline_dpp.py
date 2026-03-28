@@ -51,8 +51,8 @@ def _ensure_out(prompt: str) -> Path:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--prompt", type=str, required=True)
-    p.add_argument("--K", type=int, default=4)
-    p.add_argument("--steps", type=int, default=28)
+    p.add_argument("--G", type=int, default=4)
+    p.add_argument("--steps", type=int, default=30)
     p.add_argument("--guidance", type=float, default=7.0)
     p.add_argument("--seed", type=int, default=42)
 
@@ -157,11 +157,12 @@ def main():
         kw["latents"] = lat_new
         return kw
 
-    prompts = [args.prompt] * args.K
-    print(f"[DPP] Sampling K={args.K}, steps={args.steps}, guidance={args.guidance} ...")
+    prompts = [args.prompt] * args.G
+    print(f"[DPP] Sampling G={args.G}, steps={args.steps}, guidance={args.guidance} ...")
 
     result = pipe(
         prompt=prompts,
+        height=512, width=512,
         num_inference_steps=args.steps,
         guidance_scale=args.guidance,
         callback_on_step_end=dpp_callback,

@@ -29,9 +29,9 @@ We thank the reviewer for raising this important point. We do provide a runtime 
 
 > Weakness 2: Limited qualitative diversity evidence
 
-We thank the reviewer for this helpful suggestion. We agree that the originally shown qualitative examples were relatively limited in scenario diversity. To better assess whether OSCAR improves diversity beyond fixed settings such as buses or restaurants, we conducted additional experiments on **T2I-Bench**, where we randomly sampled 80 prompts from each of the **color**, **complex**, and **spatial** subsets and generated images for comparison across methods using the same evaluation protocol.
+We thank the reviewer for this helpful suggestion. We agree that the originally shown qualitative examples were relatively limited in scenario diversity. To better assess whether OSCAR improves diversity beyond fixed settings such as buses or restaurants, we conducted additional experiments on **T2I-CompBench**, where we randomly sampled 80 prompts from each of the **color**, **complex**, and **spatial** subsets and generated images for comparison across methods using the same evaluation protocol.
 
-In addition, to provide more direct qualitative evidence, we selected one representative prompt from each subset and included the generated samples in the linked results: **“a blue bench and a green boat”** (color), **“a bicycle on the left of a bird”** (spatial), and **“The black camera was mounted on the silver tripod”** (complex). These examples were chosen to cover a broader range of compositional and attribute-binding scenarios than the original examples. The aggregated quantitative results over the 80 sampled prompts per subset are reported in the table below. Together, the expanded T2I-Bench evaluation and these qualitative cases provide stronger evidence that OSCAR improves diversity beyond the previously shown fixed scenarios.
+In addition, to provide more direct qualitative evidence, we selected one representative prompt from each subset and included the generated samples in the linked results: **“a blue bench and a green boat”** (color), **“a bicycle on the left of a bird”** (spatial), and **“The black camera was mounted on the silver tripod”** (complex) in **section 1:Qualitative Comparison: Diversity**. These examples were chosen to cover a broader range of compositional and attribute-binding scenarios than the original examples. The aggregated quantitative results over the 80 sampled prompts per subset are reported in the table below. Together, the expanded T2I-Bench evaluation and these qualitative cases provide stronger evidence that OSCAR improves diversity beyond the previously shown fixed scenarios. Due to space limits, results can be found in the https://anonymous.4open.science/r/2026-ICML-rebuttal-BB38 under **Section 3: Quantitative Results on T2I-CompBench**.
 
 | method    | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim | BLIPvqa |
 |-----------|----------------:|------------:|-----------:|------------------:|--------:|
@@ -39,7 +39,6 @@ In addition, to provide more direct qualitative evidence, we selected one repres
 | cads      | 3.16            | 2.21        | 38.98      | 0.8872            | 0.8257  |
 | pg        | 3.15            | 2.32        | 39.28      | 0.8653            | 0.8265  |
 | dpp       | 3.11            | 2.40        | 38.97      | 0.8750            | 0.8083  |
-| apg       | 3.09            | 2.38        | 39.14      | 0.8897            | 0.8371  |
 | ourmethod | 3.24            | 2.53        | 39.19      | 0.9025            | 0.8369  |
 
 > Weakness 3: Lack of challenging human/portrait examples (maintain image quality)
@@ -52,7 +51,7 @@ Concretely, we constructed several detailed prompts involving human subjects, su
 - *“A professional portrait of a master artisan working in a sunlit woodcarving workshop, fine dust in the air, highly detailed skin textures and hands.”*  
 - *“A medium-shot of a person wearing a glossy silk evening gown, standing on a rainy city balcony at night with vibrant neon reflections, high fashion style.”*
 
-For each prompt, we compare 4 generated samples across methods in the linked results. These examples were chosen because they are particularly sensitive to quality degradation under diversity enhancement. In these portrait settings, OSCAR continues to maintain realistic facial structure and fine local details while providing meaningful diversity, which offers additional qualitative evidence that our method preserves image quality more effectively than simpler diversity-oriented baselines.
+For each prompt, we provide 4 generated samples in the linked results. These examples were chosen because they are particularly sensitive to quality degradation under diversity enhancement, especially in terms of facial plausibility, fine local details, and material rendering. We include them to visually demonstrate that OSCAR does not noticeably degrade image quality in these challenging portrait settings. The qualitative results are available in the anonymous repository at https://anonymous.4open.science/r/2026-ICML-rebuttal-BB38/readme.md under **Section 2. Qualitative Comparison: Quality Preservation on Challenging Portrait Prompts**.
 
 **Best regards,** 
 **Authors**
@@ -79,16 +78,7 @@ We thank the reviewer for pointing this out. We agree that APG is a relevant bas
 
 > Weakness 3: Limited concept coverage in evaluation
 
-We thank the reviewer for the suggestion and have conducted additional experiments on the color and complex subsets of T2I-Bench. Specifically, for each subset, we randomly sampled 80 prompts from the benchmark and generated 16 images per prompt. We then evaluated all methods using the same diversity and quality metrics as in the main paper. The results show that our method performs favorably against most baselines on both subsets, demonstrating a consistently strong overall performance across the evaluated metrics. These results further support our main claim that our method can improve output diversity while maintaining competitive generation quality. Due to space limits, we show only the **complex** results here; additional quantitative results can be found in the https://anonymous.4open.science/r/2026-ICML-rebuttal-BB38 under **Section 3: Quantitative Results on T2I-CompBench**.
-
-| method    | vendi_inception | vendi_pixel | clip_score | one_minus_ms_ssim | BLIPvqa |
-|-----------|----------------:|------------:|-----------:|------------------:|--------:|
-| base      | 2.95            | 1.89        | 36.03      | 0.8092            | 0.7384  |
-| cads      | 3.04            | 1.86        | 35.20      | 0.8231            | 0.7245  |
-| pg        | 3.02            | 1.94        | 35.37      | 0.7835            | 0.7811  |
-| dpp       | 2.93            | 1.99        | 35.55      | 0.7984            | 0.7914  |
-| apg       | 2.97            | 1.99        | 35.61      | 0.8039            | 0.7953  |
-| ourmethod | 3.15            | 2.13        | 35.53      | 0.8185            | 0.7952  |
+We thank the reviewer for the suggestion and have conducted additional experiments on the color and complex subsets of T2I-Bench. Specifically, for each subset, we randomly sampled 80 prompts from the benchmark and generated 16 images per prompt. We then evaluated all methods using the same diversity and quality metrics as in the main paper. The results show that our method performs favorably against most baselines on both subsets, demonstrating a consistently strong overall performance across the evaluated metrics. These results further support our main claim that our method can improve output diversity while maintaining competitive generation quality. Due to space limits, results can be found in the https://anonymous.4open.science/r/2026-ICML-rebuttal-BB38 under **Section 3: Quantitative Results on T2I-CompBench**.
 
 > Weakness 4: Insufficient baseline implementation details
 

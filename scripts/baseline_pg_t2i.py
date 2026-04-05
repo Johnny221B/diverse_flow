@@ -41,6 +41,9 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--width", type=int, default=512)
     p.add_argument("--device", type=str, default="cuda:0")
     p.add_argument("--seed", type=int, default=1111)
+    p.add_argument("--save-offset", type=int, default=0,
+                   help="Start saving images from this index (e.g. 0→000.png, 2→002.png). "
+                        "Useful for 2-GPU parallel splits: GPU0 uses offset=0, GPU1 uses offset=G//2.")
 
     # PG 核心参数
     p.add_argument("--pg-mode", type=str, choices=["ode", "sde"], default="ode")
@@ -112,8 +115,10 @@ def main():
             pslug = slugify(prompt_text)
             run_dir = os.path.join(imgs_root_dir, pslug)
 
-            # SKIP 逻辑
-            if os.path.exists(run_dir) and len(os.listdir(run_dir)) >= args.G:
+            # SKIP 逻辑：检查此实例负责的文件是否都已存在
+            expected = [os.path.join(run_dir, f"{args.save_offset + i:03d}.png")
+                        for i in range(args.G)]
+            if all(os.path.exists(f) for f in expected):
                 _log(f"  [SKIP] '{prompt_text[:40]}...' already generated.")
                 continue
 
@@ -132,9 +137,9 @@ def main():
                 seed=args.seed,
             )
 
-            # 保存图片 (000.png 格式)
+            # 保存图片：使用 save_offset 偏移文件名
             for i, img in enumerate(images):
-                save_path = os.path.join(run_dir, f"{i:03d}.png")
+                save_path = os.path.join(run_dir, f"{args.save_offset + i:03d}.png")
                 img.save(save_path)
 
             # 每组生成完释放显存

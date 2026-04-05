@@ -1,0 +1,146 @@
+[
+  {
+    "method": "base",
+    "G": 4,
+    "elapsed_s": 63.04,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 7832,
+      "3": 32702
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "apg",
+    "G": 4,
+    "elapsed_s": 65.86,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 7832,
+      "3": 32702
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "mix",
+    "G": 4,
+    "elapsed_s": 66.88,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 7832,
+      "3": 32702
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "cads",
+    "G": 4,
+    "elapsed_s": 24.19,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 5112,
+      "3": 16628
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "dpp",
+    "G": 4,
+    "elapsed_s": 1.73,
+    "ok": false,
+    "peak_vram_mib": {
+      "2": 1,
+      "3": 1
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "ourmethod",
+    "G": 4,
+    "elapsed_s": 15.25,
+    "ok": false,
+    "peak_vram_mib": {
+      "2": 5460,
+      "3": 16664
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "base",
+    "G": 32,
+    "elapsed_s": 431.7,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 41938,
+      "3": 40824
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "apg",
+    "G": 32,
+    "elapsed_s": 448.27,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 7832,
+      "3": 32702
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "mix",
+    "G": 32,
+    "elapsed_s": 449.49,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 7832,
+      "3": 32702
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "cads",
+    "G": 32,
+    "elapsed_s": 100.6,
+    "ok": true,
+    "peak_vram_mib": {
+      "2": 37036,
+      "3": 21280
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "dpp",
+    "G": 32,
+    "elapsed_s": 1.71,
+    "ok": false,
+    "peak_vram_mib": {
+      "2": 1,
+      "3": 1
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "ourmethod",
+    "G": 32,
+    "elapsed_s": 20.84,
+    "ok": false,
+    "peak_vram_mib": {
+      "2": 5478,
+      "3": 21316
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  }
+]

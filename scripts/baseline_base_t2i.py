@@ -4,6 +4,7 @@
 """
 Baseline: Vanilla Stable Diffusion 3.5 - T2I CompBench Version
 最基础的基线：没有任何修饰，直接调用原版 SD3.5 模型生成图片。
+支持双卡部署：transformer+text encoders 在 cuda:1，VAE 在 cuda:0。
 """
 
 import os
@@ -37,15 +38,19 @@ def parse_args():
     ap.add_argument('--spec', type=str, required=True, help='Path to JSON spec (e.g. mini_color.json)')
     ap.add_argument('--method', type=str, default='baseline_base', help='Method name prefix')
     ap.add_argument('--model-dir', type=str, required=True)
-    
+
     ap.add_argument('--G', type=int, default=16, help='Number of images per prompt')
     ap.add_argument('--steps', type=int, default=30)
     ap.add_argument('--guidance', type=float, default=5.0)
     ap.add_argument('--seed', type=int, default=1111)
 
-    ap.add_argument('--device', type=str, default='cuda:0', help='Primary device for offloading')
+    ap.add_argument('--device_transformer', type=str, default='cuda:1')
+    ap.add_argument('--device_vae',         type=str, default='cuda:0')
+    ap.add_argument('--device_text1',       type=str, default='cuda:1')
+    ap.add_argument('--device_text2',       type=str, default='cuda:1')
+    ap.add_argument('--device_text3',       type=str, default='cuda:1')
     ap.add_argument('--fp16', action='store_true')
-    
+
     return ap.parse_args()
 
 def _log(s):
@@ -54,8 +59,10 @@ def _log(s):
 
 def main():
     args = parse_args()
-    device = torch.device(args.device)
     dtype = torch.float16 if args.fp16 else torch.float32
+
+    dev_tr  = torch.device(args.device_transformer)
+    dev_vae = torch.device(args.device_vae)
 
     # 1. 解析 Spec
     with open(args.spec, "r", encoding="utf-8") as f:
@@ -63,54 +70,54 @@ def main():
 
     # 2. 加载模型
     model_path = resolve_model_dir(args.model_dir)
-    
+
     _log(f"Loading SD3.5 Base Model from {model_path}...")
     pipe = StableDiffusion3Pipeline.from_pretrained(
-        str(model_path), # 使用解析后的绝对路径
-        torch_dtype=dtype, 
+        str(model_path),
+        torch_dtype=dtype,
         local_files_only=True
     )
-    
-    # 显存优化组合拳：针对 G=16 必须开启
-    # 使用官方推荐的 offload 模式，它会自动管理多卡显存分布
-    pipe.enable_model_cpu_offload(device=device) 
-    
+
+    # 2-GPU component placement (transformer+TEs on cuda:1, VAE on cuda:0)
+    pipe.transformer.to(dev_tr)
+    pipe.vae.to(dev_vae)
+    if pipe.text_encoder:   pipe.text_encoder.to(torch.device(args.device_text1))
+    if pipe.text_encoder_2: pipe.text_encoder_2.to(torch.device(args.device_text2))
+    if pipe.text_encoder_3: pipe.text_encoder_3.to(torch.device(args.device_text3))
+
     if hasattr(pipe, "vae"):
-        # 修复之前提到的 AttributeError，直接访问模块
         pipe.vae.enable_tiling()
-        
+
     pipe.set_progress_bar_config(disable=True)
 
     # --------------------- 循环处理 ---------------------
     outputs_root = os.path.join(REPO_ROOT, 'outputs')
 
     for concept, prompts in concept_to_prompts.items():
-        # 建立 Concept 目录： outputs/baseline_base_color/
         base_out_dir = os.path.join(outputs_root, f"{args.method}_{concept}")
         imgs_root_dir = os.path.join(base_out_dir, "imgs")
         eval_dir = os.path.join(base_out_dir, "eval")
-        
+
         os.makedirs(imgs_root_dir, exist_ok=True)
         os.makedirs(eval_dir, exist_ok=True)
-        
+
         _log(f"\n>>> [BASE] Starting Concept: {concept} | Saving to: {base_out_dir}")
 
         for prompt_text in prompts:
             prompt_slug = _slugify(prompt_text)
             run_dir = os.path.join(imgs_root_dir, prompt_slug)
 
-            # 断点续跑支持
             if os.path.exists(run_dir) and len(os.listdir(run_dir)) >= args.G:
                 _log(f"  [SKIP] '{prompt_text[:40]}...' already generated.")
                 continue
-            
+
             os.makedirs(run_dir, exist_ok=True)
             _log(f"  [RUN] Prompt: '{prompt_text}'")
 
-            generator = torch.Generator(device=device).manual_seed(args.seed)
+            generator = torch.Generator(device=dev_tr).manual_seed(args.seed)
 
-            # 调用原版 Pipeline
-            images = pipe(
+            # Generate latents on transformer device, decode manually on VAE device
+            latents = pipe(
                 prompt=prompt_text,
                 height=512,
                 width=512,
@@ -118,15 +125,18 @@ def main():
                 guidance_scale=args.guidance,
                 num_images_per_prompt=args.G,
                 generator=generator,
-                output_type="pil"
+                output_type="latent",
             ).images
 
-            # 保存图片 (000.png 格式适配 T2I-CompBench 评估)
+            latents = latents.to(device=dev_vae, dtype=pipe.vae.dtype)
+            with torch.no_grad():
+                decoded = pipe.vae.decode(latents / pipe.vae.config.scaling_factor, return_dict=False)[0]
+                images = pipe.image_processor.postprocess(decoded, output_type="pil")
+
             for i, img in enumerate(images):
                 img.save(os.path.join(run_dir, f"{i:03d}.png"))
 
-            # 及时回收显存
-            del images
+            del images, latents, decoded
             torch.cuda.empty_cache()
 
     _log("Base Model (Vanilla ODE) Generation Tasks Completed.")

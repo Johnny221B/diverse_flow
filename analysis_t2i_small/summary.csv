@@ -1,5 +1,0 @@
-metric,ourmethod_min,ourmethod_min_prompt,largest_gap,largest_gap_prompt,largest_gap_best_method
-vendi_inception,1.3366,The red apple was on top of the white plate,0.9305000000000001,a fish on the left of a microwave,dpp
-vendi_pixel,1.2406,a giraffe on the top of a man,0.5062,a girl on the left of a frog,dpp
-clip_score,24.7786,a man on the right of a plate,7.4436000000000035,a giraffe on the top of a man,dpp
-one_minus_ms_ssim,0.5292,a bee on the top of a airplane,0.21429999999999993,The green plant was on the right the white wall,dpp

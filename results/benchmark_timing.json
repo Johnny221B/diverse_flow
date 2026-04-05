@@ -1,0 +1,50 @@
+[
+  {
+    "method": "base",
+    "G": 4,
+    "elapsed_s": 57.74,
+    "ok": true,
+    "peak_vram_mib": {
+      "0": 7832,
+      "1": 32702
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "apg",
+    "G": 4,
+    "elapsed_s": 57.87,
+    "ok": true,
+    "peak_vram_mib": {
+      "0": 7832,
+      "1": 32702
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "mix",
+    "G": 4,
+    "elapsed_s": 58.5,
+    "ok": true,
+    "peak_vram_mib": {
+      "0": 7832,
+      "1": 48499
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  },
+  {
+    "method": "pg",
+    "G": 4,
+    "elapsed_s": 29.7,
+    "ok": false,
+    "peak_vram_mib": {
+      "0": 33257,
+      "1": 48531
+    },
+    "num_gpus": 2,
+    "warmup_done": true
+  }
+]

@@ -187,7 +187,7 @@ def main():
 
             prompts_list = [prompt_text] * args.G
 
-            # 跑管线
+            # 跑管线（取 latent，避免一次性 VAE decode 64 张 OOM）
             result = pipe(
                 prompt=prompts_list,
                 height=512, width=512,
@@ -195,19 +195,35 @@ def main():
                 guidance_scale=args.guidance,
                 callback_on_step_end=dpp_callback,
                 callback_on_step_end_tensor_inputs=["latents"],
-                output_type="pil",
+                output_type="latent",
             )
 
-            # 保存图片
-            images = result.images if hasattr(result, "images") else result
-            for i, img in enumerate(images):
-                if isinstance(img, Image.Image):
-                    img.save(run_dir / f"{i:03d}.png")
-                else:
-                    Image.fromarray(img).save(run_dir / f"{i:03d}.png")
-            
+            # 分批 VAE decode（每批 8 张），避免 G=64 时 OOM
+            latents = result.images  # shape: (G, C, H, W) in latent space
+            vae = pipe.vae
+            vae_dtype = next(vae.parameters()).dtype
+            vae_device = next(vae.parameters()).device
+            decode_batch = 8
+            img_idx = 0
+            for batch_start in range(0, latents.shape[0], decode_batch):
+                batch_lat = latents[batch_start:batch_start + decode_batch].to(
+                    device=vae_device, dtype=vae_dtype
+                )
+                with torch.no_grad():
+                    decoded = vae.decode(
+                        batch_lat / vae.config.scaling_factor, return_dict=False
+                    )[0]
+                decoded = (decoded / 2 + 0.5).clamp(0, 1)
+                decoded = decoded.permute(0, 2, 3, 1).cpu().float().numpy()
+                for arr in decoded:
+                    img = Image.fromarray((arr * 255).round().astype("uint8"))
+                    img.save(run_dir / f"{img_idx:03d}.png")
+                    img_idx += 1
+                del batch_lat, decoded
+                torch.cuda.empty_cache()
+
             # 清理显存
-            del result, images, coupler
+            del result, latents, coupler
             torch.cuda.empty_cache()
 
     print("\n[DPP] All Tasks Completed Successfully.")

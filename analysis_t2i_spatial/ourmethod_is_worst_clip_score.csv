@@ -1,6 +1,0 @@
-metric,prompt_key,prompt_folder,prompt_text,ourmethod_value,worst_value,worst_methods,best_method,best_value,gap_to_best,base,ourmethod,cads,pg,dpp,mix,apg
-clip_score,a_refrigerator_on_the_bottom_of_a_dog,a_refrigerator_on_the_bottom_of_a_dog,a refrigerator on the bottom of a dog,34.5733,34.5733,ourmethod,base,38.4237,3.8503999999999934,38.4237,34.5733,38.2263,35.9017,,35.3132,36.4085
-clip_score,a_backpack_on_the_right_of_a_bird,a_backpack_on_the_right_of_a_bird,a backpack on the right of a bird,39.3934,39.3934,ourmethod,dpp,42.2622,2.8688000000000002,40.4388,39.3934,40.9505,40.4038,42.2622,39.7417,41.2515
-clip_score,a_key_on_the_top_of_a_frog,a_key_on_the_top_of_a_frog,a key on the top of a frog,36.9392,36.9392,ourmethod,base,38.9164,1.9772000000000034,38.9164,36.9392,38.9106,38.1132,,38.7637,38.7392
-clip_score,a_painting_on_the_right_of_a_bee,a_painting_on_the_right_of_a_bee,a painting on the right of a bee,32.888,32.888,ourmethod,dpp,34.6476,1.759599999999999,33.6715,32.888,33.6773,32.9873,34.6476,33.0952,33.7122
-clip_score,a_chicken_on_the_bottom_of_a_desk,a_chicken_on_the_bottom_of_a_desk,a chicken on the bottom of a desk,38.2015,38.2015,ourmethod,pg,38.6704,0.4688999999999979,38.4518,38.2015,38.5159,38.6704,38.4879,38.5238,38.5394

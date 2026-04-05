@@ -95,6 +95,11 @@ def make_method_grid_auto(
                 return exact_dir
 
         candidates = [x for x in imgs_root.iterdir() if x.is_dir()]
+
+        # exact normalized full-name match (handles case differences like dpp lowercase)
+        for c in candidates:
+            if normalize_text(c.name) == normalize_text(query_prompt):
+                return c
         if len(candidates) == 0:
             raise FileNotFoundError(f"No prompt folders found under {imgs_root}")
 

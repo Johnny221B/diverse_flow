@@ -152,6 +152,19 @@ def parse_args():
     ap.add_argument('--rho1', type=float, default=0.05)
     ap.add_argument('--noise-partial-ortho', type=float, default=1.0)
     ap.add_argument('--vnorm-threshold', type=float, default=1e-4)
+    ap.add_argument('--vae-chunk', type=int, default=4,
+                    help='Sub-batch size for VAE decode inside callback (trade OOM vs speed)')
+    ap.add_argument('--update-every', type=int, default=1,
+                    help='Apply diversity gradient only every K steps (1=every step). '
+                         'K=2 halves the CLIP/VAE overhead with minimal quality loss.')
+
+    # Memory bank (offline diversity for small m)
+    ap.add_argument('--memory-bank-size', type=int, default=0,
+                    help='Memory bank size (0=disabled). When >0, diversity signal is '
+                         'augmented with up to N cached features from previous prompts, '
+                         'enabling effective diversity guidance even at small batch sizes.')
+    ap.add_argument('--memory-bank-decay', type=float, default=0.0,
+                    help='Exponential decay for older bank entries (0=uniform weight)')
 
     # 安全的“初噪正交化”注入
     ap.add_argument('--init-ortho', type=float, default=0.2)
@@ -261,6 +274,18 @@ def main():
             leverage_alpha=0.5,
         )
         vol = VolumeObjective(clip, cfg)
+
+        # Memory bank for offline diversity (small-m support)
+        memory_bank = None
+        if args.memory_bank_size > 0:
+            from diverse_flow.memory_bank import OfflineMemoryBank
+            memory_bank = OfflineMemoryBank(
+                max_size=args.memory_bank_size,
+                decay=args.memory_bank_decay,
+                device="cpu",
+            )
+            _log(f"Memory bank enabled: max_size={args.memory_bank_size}, "
+                 f"decay={args.memory_bank_decay}", True)
 
         # --------------------- 循环处理逻辑 ---------------------
         outputs_root = os.path.join(project_root, 'outputs')
@@ -379,63 +404,100 @@ def main():
                         state["prev_dt_unit"] = dt_unit
                         return kw
 
+                    # ── update-every: skip diversity gradient on non-update steps ──
+                    update_every = max(1, int(getattr(args, "update_every", 1)))
+                    if update_every > 1 and (i % update_every) != 0:
+                        state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
+                        state["prev_latents_vae_cpu"] = lat.detach().to("cpu")
+                        state["prev_dt_unit"] = dt_unit
+                        return kw
+
                     lat_new = lat.clone()
                     lat_vae_full = lat.detach().to(dev_vae, non_blocking=True).clone()
                     B = lat_vae_full.size(0)
-                    chunk = 2 if B >= 2 else 1
+                    vae_chunk = max(1, min(int(getattr(args, "vae_chunk", 4)), B))
 
                     prev_cpu = state.get("prev_latents_vae_cpu", None)
 
-                    for s in range(0, B, chunk):
-                        e = min(B, s + chunk)
-                        z = lat_vae_full[s:e].detach().clone().requires_grad_(True)
+                    # ── Build per-sample v_est (full batch) ──────────────────────────
+                    v_est_all = None
+                    if prev_cpu is not None:
+                        z_prev_full = prev_cpu.to(dev_vae, non_blocking=True)
+                        total_diff  = lat_vae_full.detach() - z_prev_full
+                        prev_ctrl = state.get("prev_ctrl_vae_cpu", None)
+                        prev_dt   = state.get("prev_dt_unit", None)
+                        if (prev_ctrl is not None) and (prev_dt is not None):
+                            ctrl_prev_full = prev_ctrl.to(dev_vae, non_blocking=True)
+                            v_est_all = (total_diff - ctrl_prev_full) / max(prev_dt, 1e-8)
+                        else:
+                            v_est_all = total_diff / max(dt_unit, 1e-8)
 
-                        v_est = None
-                        if prev_cpu is not None:
-                            z_prev = prev_cpu[s:e].to(dev_vae, non_blocking=True)
-                            z_det = z.detach()
-                            total_diff = z_det - z_prev
-                            prev_ctrl = state.get("prev_ctrl_vae_cpu", None)
-                            prev_dt   = state.get("prev_dt_unit", None)
-
-                            if (prev_ctrl is not None) and (prev_dt is not None):
-                                ctrl_prev = prev_ctrl[s:e].to(dev_vae, non_blocking=True)
-                                base_move_prev = total_diff - ctrl_prev
-                                v_est = base_move_prev / max(prev_dt, 1e-8)
+                    # ── Pass A: decode ALL endpoint latents (no-grad) for global CLIP gradient ──
+                    # Key fix: build the B×B Gram matrix over all images simultaneously,
+                    # so every trajectory repels ALL others (not just its chunk-partner).
+                    with torch.no_grad():
+                        imgs_nograd_list = []
+                        for s_a in range(0, B, vae_chunk):
+                            e_a = min(B, s_a + vae_chunk)
+                            z_chunk_a = lat_vae_full[s_a:e_a]
+                            if v_est_all is not None:
+                                z_pred_a = z_chunk_a + dt_unit * v_est_all[s_a:e_a]
                             else:
-                                v_est = total_diff / max(dt_unit, 1e-8)
+                                z_pred_a = z_chunk_a
+                            imgs_nograd_list.append(_vae_decode_pixels(z_pred_a))
+                        imgs_nograd_all = torch.cat(imgs_nograd_list, dim=0)  # [B,3,H,W]
 
-                        def _decode_with_endpoint(z_var: torch.Tensor) -> torch.Tensor:
-                            if v_est is not None:
-                                z_pred = z_var + dt_unit * v_est
-                            else:
-                                z_pred = z_var
+                    # ── Pass B: global volume gradient (B×B Gram matrix) ───────────────
+                    phi_mem = memory_bank.get(query_device=dev_clip) \
+                              if memory_bank is not None else None
+                    _loss, grad_img_all, _logs = vol.volume_loss_and_grad(
+                        imgs_nograd_all.to(dev_clip), phi_memory=phi_mem)   # [B,3,H,W]
+                    current_logdet = float(_logs.get("logdet", 0.0))
+
+                    last_logdet = state.get("last_logdet", None)
+                    if (last_logdet is not None) and (current_logdet < last_logdet):
+                        gamma_sched = 0.5 * gamma_sched
+                    state["last_logdet"] = current_logdet
+
+                    grad_img_vae_all = grad_img_all.to(dev_vae, non_blocking=True)
+                    del imgs_nograd_all
+
+                    # ── Pass C: per-chunk VAE VJP (pixel grad → latent grad) ───────────
+                    # Recompute each chunk WITH grad so autograd can backprop through VAE.
+                    # IMPORTANT: z_pred_chunk must be created INSIDE torch.enable_grad()
+                    # because the outer pipeline context is @torch.no_grad() and arithmetic
+                    # ops outside enable_grad won't build a grad_fn.
+                    ctrl_chunks = []
+                    for s in range(0, B, vae_chunk):
+                        e = min(B, s + vae_chunk)
+
+                        z_chunk   = lat_vae_full[s:e].detach().clone().requires_grad_(True)
+                        v_chunk_s = v_est_all[s:e].detach() if v_est_all is not None else None
+
+                        def _decode_endpoint_chunk(z_var, _v=v_chunk_s, _dt=dt_unit):
+                            z_pred = z_var + _dt * _v if _v is not None else z_var
                             return _vae_decode_pixels(z_pred)
 
-                        with torch.enable_grad(), torch.backends.cudnn.flags(enabled=False, benchmark=False, deterministic=False):
-                            imgs_chunk = checkpoint(_decode_with_endpoint, z, use_reentrant=False)
+                        with torch.enable_grad(), torch.backends.cudnn.flags(
+                                enabled=False, benchmark=False, deterministic=False):
+                            imgs_chunk = checkpoint(
+                                _decode_endpoint_chunk, z_chunk, use_reentrant=False)
 
-                        imgs_clip = imgs_chunk.to(dev_clip, non_blocking=True)
-                        _loss, grad_img_clip, _logs = vol.volume_loss_and_grad(imgs_clip)
-                        current_logdet = float(_logs.get("logdet", 0.0))
-
-                        last_logdet = state.get("last_logdet", None)
-                        if (last_logdet is not None) and (current_logdet < last_logdet):
-                            gamma_sched = 0.5 * gamma_sched
-                        state["last_logdet"] = current_logdet
-
-                        grad_img_vae = grad_img_clip.to(dev_vae, non_blocking=True).to(imgs_chunk.dtype)
-
-                        grad_lat = torch.autograd.grad(
-                            outputs=imgs_chunk, inputs=z, grad_outputs=grad_img_vae,
-                            retain_graph=False, create_graph=False, allow_unused=False
+                        go = grad_img_vae_all[s:e].to(dev_vae).to(imgs_chunk.dtype)
+                        grad_lat_chunk = torch.autograd.grad(
+                            outputs=imgs_chunk, inputs=z_chunk,
+                            grad_outputs=go,
+                            retain_graph=False, create_graph=False
                         )[0]
 
-                        g_proj = project_partial_orth(grad_lat, v_est, cfg.partial_ortho) if v_est is not None else grad_lat
-                        div_disp = g_proj * dt_unit  
+                        v_chunk = v_est_all[s:e] if v_est_all is not None else None
+                        g_proj  = project_partial_orth(grad_lat_chunk, v_chunk, cfg.partial_ortho) \
+                                  if v_chunk is not None else grad_lat_chunk
+                        div_disp = g_proj * dt_unit
 
-                        brown_std = _brownian_std_from_scheduler(ppl, i) 
-                        eta = float(args.eta_sde)
+                        # ── Noise injection ───────────────────────────────────────
+                        brown_std = _brownian_std_from_scheduler(ppl, i)
+                        eta       = float(args.eta_sde)
                         base_brown = eta * brown_std
 
                         if args.noise_timing == 'early':
@@ -443,49 +505,43 @@ def main():
                         else:
                             rho_t = args.rho1 * t_norm + args.rho0 * (1.0 - t_norm)
 
-                        base_disp = (v_est * dt_unit) if v_est is not None else z
-                        base_norm = _bn(base_disp)  
+                        base_disp = (v_chunk * dt_unit) if v_chunk is not None \
+                                    else lat_vae_full[s:e].detach()
+                        base_norm = _bn(base_disp)
 
                         target_brown = torch.full_like(base_norm, fill_value=max(base_brown, 0.0))
                         target_snr   = torch.clamp(base_norm * max(rho_t, 0.0), min=0.0)
-                        target = torch.minimum(target_brown, target_snr)  
+                        target       = torch.minimum(target_brown, target_snr)
 
                         xi = torch.randn_like(g_proj)
-
-                        vnorm = _bn(v_est) if v_est is not None else None
-                        if (v_est is None) or (vnorm is None) or (float(vnorm.mean().item()) < float(args.vnorm_threshold)):
+                        vnorm = _bn(v_chunk) if v_chunk is not None else None
+                        if (v_chunk is None) or (vnorm is None) or \
+                                (float(vnorm.mean().item()) < float(args.vnorm_threshold)):
                             xi_eff = xi
                         else:
-                            xi_eff = project_partial_orth(xi, v_est, float(args.noise_partial_ortho))
+                            xi_eff = project_partial_orth(xi, v_chunk, float(args.noise_partial_ortho))
 
-                        xi_norm = _bn(xi_eff)  
+                        xi_norm    = _bn(xi_eff)
                         noise_disp = xi_eff / (xi_norm.view(-1,1,1,1) + 1e-12) * target.view(-1,1,1,1)
 
-                        disp_cap  = cfg.gamma_max_ratio * _bn(base_disp)
-                        div_raw   = _bn(div_disp)
-                        scale     = torch.minimum(torch.ones_like(disp_cap), disp_cap / (div_raw + 1e-12))
+                        disp_cap = cfg.gamma_max_ratio * _bn(base_disp)
+                        div_raw  = _bn(div_disp)
+                        scale    = torch.minimum(torch.ones_like(disp_cap), disp_cap / (div_raw + 1e-12))
 
                         delta_chunk = (gamma_sched * scale.view(-1,1,1,1)) * div_disp + noise_disp
-
-                        delta_tr = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
+                        delta_tr    = delta_chunk.to(lat_new.device, non_blocking=True).to(lat_new.dtype)
                         lat_new[s:e] = lat_new[s:e] + delta_tr
+                        ctrl_chunks.append(delta_chunk.detach().to("cpu"))
 
-                        if "ctrl_cache" not in state:
-                            state["ctrl_cache"] = []
-                        state["ctrl_cache"].append(delta_chunk.detach().to("cpu"))
-
-                        if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
-                        if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
-                        del imgs_chunk, imgs_clip, grad_img_clip, grad_img_vae, grad_lat, g_proj, div_disp, noise_disp, delta_chunk, delta_tr, z, v_est
+                    if dev_clip.type == 'cuda': torch.cuda.synchronize(dev_clip)
+                    if dev_vae.type  == 'cuda': torch.cuda.synchronize(dev_vae)
+                    del grad_img_all, grad_img_vae_all
 
                     kw["latents"] = lat_new
+                    state["prev_ctrl_vae_cpu"] = torch.cat(ctrl_chunks, dim=0)
 
                     state["prev_prev_latents_vae_cpu"] = state.get("prev_latents_vae_cpu", None)
                     state["prev_latents_vae_cpu"] = lat_vae_full.detach().to("cpu")
-
-                    if "ctrl_cache" in state:
-                        state["prev_ctrl_vae_cpu"] = torch.cat(state["ctrl_cache"], dim=0).to("cpu")
-                        del state["ctrl_cache"]
                     state["prev_dt_unit"] = dt_unit
                     return kw
 
@@ -520,7 +576,16 @@ def main():
                 for i in range(images.size(0)):
                     save_image(images[i].cpu(), os.path.join(run_dir, f"{i:03d}.png"))
 
-                # ===== 6) 彻底释放本轮 Prompt 占用的显存 =====
+                # ===== 6) Update memory bank with final-image features =====
+                if memory_bank is not None:
+                    with torch.no_grad():
+                        imgs_for_bank = images.detach().to(dev_clip, dtype=torch.float32)
+                        phi_final = clip.encode_image_from_pixels(imgs_for_bank, size=224)
+                        phi_final = F.normalize(phi_final, dim=-1)
+                        memory_bank.update(phi_final)
+                    _log(f"  [Bank] updated, size={memory_bank.size()}", True)
+
+                # ===== 7) 彻底释放本轮 Prompt 占用的显存 =====
                 del latents_out, latents_final, images
                 torch.cuda.empty_cache()
 

@@ -29,19 +29,23 @@ def parse_args():
     ap.add_argument('--spec', type=str, required=True, help='Path to JSON: {concept:[prompts...]}')
     ap.add_argument('--method', type=str, default='apg_t2i')
     ap.add_argument('--model-dir', type=str, required=True)
-    
+
     ap.add_argument('--G', type=int, default=16, help='Total samples per prompt')
     ap.add_argument('--micro-batch', type=int, default=4, help='Avoid OOM')
     ap.add_argument('--steps', type=int, default=30)
     ap.add_argument('--guidance', type=float, default=5.0)
     ap.add_argument('--seed', type=int, default=1111)
-    
+
     # APG 潜在参数
     ap.add_argument('--eta-apg', type=float, default=0.15)
-    
-    ap.add_argument('--device', type=str, default='cuda:0')
+
+    ap.add_argument('--device_transformer', type=str, default='cuda:1')
+    ap.add_argument('--device_vae',         type=str, default='cuda:0')
+    ap.add_argument('--device_text1',       type=str, default='cuda:1')
+    ap.add_argument('--device_text2',       type=str, default='cuda:1')
+    ap.add_argument('--device_text3',       type=str, default='cuda:1')
     ap.add_argument('--fp16', action='store_true')
-    
+
     return ap.parse_args()
 
 def _log(s):
@@ -50,8 +54,10 @@ def _log(s):
 
 def main():
     args = parse_args()
-    device = torch.device(args.device)
     dtype = torch.float16 if args.fp16 else torch.float32
+
+    dev_tr  = torch.device(args.device_transformer)
+    dev_vae = torch.device(args.device_vae)
 
     # 1. 加载模型
     model_path = resolve_model_dir(args.model_dir)
@@ -60,8 +66,13 @@ def main():
         model_path, torch_dtype=dtype, local_files_only=True
     )
 
-    # 显存优化
-    pipe.enable_model_cpu_offload(device=device) 
+    # 2-GPU component placement
+    pipe.transformer.to(dev_tr)
+    pipe.vae.to(dev_vae)
+    if pipe.text_encoder:   pipe.text_encoder.to(torch.device(args.device_text1))
+    if pipe.text_encoder_2: pipe.text_encoder_2.to(torch.device(args.device_text2))
+    if pipe.text_encoder_3: pipe.text_encoder_3.to(torch.device(args.device_text3))
+
     if hasattr(pipe, "vae"):
         pipe.vae.enable_tiling()
     pipe.set_progress_bar_config(disable=True)
@@ -79,7 +90,7 @@ def main():
         imgs_root_dir = os.path.join(base_out_dir, "imgs")
         os.makedirs(imgs_root_dir, exist_ok=True)
         os.makedirs(os.path.join(base_out_dir, "eval"), exist_ok=True)
-        
+
         _log(f"\n>>> [APG-t2i] Concept: {concept}")
 
         for prompt_text in prompts:
@@ -89,32 +100,36 @@ def main():
             if os.path.exists(run_dir) and len(os.listdir(run_dir)) >= args.G:
                 _log(f"  [SKIP] '{prompt_text[:40]}...' already exists.")
                 continue
-            
+
             os.makedirs(run_dir, exist_ok=True)
             _log(f"  [RUN] Prompt: '{prompt_text}'")
 
             generated_count = 0
             while generated_count < args.G:
                 current_bs = min(args.micro_batch, args.G - generated_count)
-                # 保证每个 micro-batch 种子不同但可复现
-                sub_generator = torch.Generator(device=device).manual_seed(args.seed + generated_count)
-                
+                sub_generator = torch.Generator(device=dev_tr).manual_seed(args.seed + generated_count)
+
                 with torch.inference_mode():
-                    images = pipe(
+                    latents = pipe(
                         prompt=prompt_text,
                         height=512, width=512,
                         num_inference_steps=args.steps,
                         guidance_scale=args.guidance,
                         num_images_per_prompt=current_bs,
                         generator=sub_generator,
-                        output_type="pil"
+                        output_type="latent",
                     ).images
-                
+
+                latents = latents.to(device=dev_vae, dtype=pipe.vae.dtype)
+                with torch.no_grad():
+                    decoded = pipe.vae.decode(latents / pipe.vae.config.scaling_factor, return_dict=False)[0]
+                    images = pipe.image_processor.postprocess(decoded, output_type="pil")
+
                 for idx, img in enumerate(images):
                     img.save(os.path.join(run_dir, f"{generated_count + idx:03d}.png"))
-                
+
                 generated_count += current_bs
-                del images
+                del images, latents, decoded
                 gc.collect()
                 torch.cuda.empty_cache()
 

@@ -1,4 +1,0 @@
-metric,prompt_key,prompt_folder,prompt_text,ourmethod_value,worst_value,worst_methods,best_method,best_value,gap_to_best,base,ourmethod,cads,pg,dpp,mix,apg
-vendi_pixel,the_green_plant_was_on_the_right_the_white_wall,The_green_plant_was_on_the_right_the_white_wall,The green plant was on the right the white wall,1.3937,1.3937,ourmethod,dpp,1.6729,0.2792000000000001,1.4444,1.3937,1.4553,1.4177,1.6729,1.4431,1.4441
-vendi_pixel,a_pink_car_and_a_red_elephant,a_pink_car_and_a_red_elephant,a pink car and a red elephant,1.3641,1.3641,ourmethod,mix,1.4591,0.09499999999999997,1.3987,1.3641,1.3996,1.3698,1.3858,1.4591,1.3988
-vendi_pixel,the_wooden_spoon_was_next_to_the_green_bowl,The_wooden_spoon_was_next_to_the_green_bowl,The wooden spoon was next to the green bowl,1.6539,1.6539,ourmethod,mix,1.7297,0.07580000000000009,1.6954,1.6539,1.6977,1.6645,1.6802,1.7297,1.6949
